@@ -1,6 +1,6 @@
 # EYL — Mapa de recuerdos
 
-Catálogo personal de fotos sobre un **globo MapLibre**: lugares en **gris** (por visitar) o **verde** (visitado). Demo inicial con Perú.
+Catálogo personal de fotos sobre un **globo MapLibre**: lugares en **gris** (por visitar) o **con tu foto** dentro del polígono (visitado). Demo inicial con Perú y Amazonas detallado.
 
 ## Requisitos
 
@@ -12,15 +12,15 @@ Catálogo personal de fotos sobre un **globo MapLibre**: lugares en **gris** (po
 1. Crea un proyecto en Supabase.
 2. **SQL Editor** → ejecuta `supabase/schema.sql`.
 3. **Storage** → bucket `photos` (público para lectura).
-4. **Authentication** → crea 2 usuarios (tú y tu pareja).
-5. **Project Settings → API** → copia URL y `anon` key.
+4. **Authentication** → crea usuarios (Auto Confirm ✅).
+5. **Project Settings → API** → copia URL y clave **anon** (pestaña Legacy).
 
 ### Políticas del bucket `photos`
 
 | Operación | Quién |
 |-----------|--------|
 | SELECT | Público |
-| INSERT / UPDATE / DELETE | Authenticated |
+| INSERT | Authenticated |
 
 ## 2. Variables de entorno
 
@@ -28,12 +28,12 @@ Catálogo personal de fotos sobre un **globo MapLibre**: lugares en **gris** (po
 copy .env.example .env
 ```
 
-Edita `.env`:
-
 ```env
 VITE_SUPABASE_URL=https://xxxxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJhbG...
 ```
+
+En **Netlify** → Environment variables (mismas dos claves) → redeploy.
 
 ## 3. Desarrollo local
 
@@ -43,54 +43,70 @@ npm install
 npm run dev
 ```
 
-Abre http://localhost:5173
+Abre http://localhost:3000
 
-Sin `.env` configurado, el mapa funciona en **modo demo local** (sin login ni subida).
+## 4. GitHub y Netlify
 
-## 4. Subir a GitHub
+Ver commits en [Bitacora-Familiar-de-Rutas](https://github.com/eduarcc99/Bitacora-Familiar-de-Rutas).
 
-```powershell
-git init
-git add .
-git commit -m "Primer demo EYL"
-git branch -M main
-git remote add origin https://github.com/TU_USUARIO/EYL.git
-git push -u origin main
-```
+- Build: `npm run build`
+- Publish: `dist`
 
-## 5. Desplegar en Netlify
+---
 
-1. [app.netlify.com](https://app.netlify.com) → Import from GitHub → repo `EYL`.
-2. Build: `npm run build` · Publish: `dist`
-3. **Environment variables** (mismas que `.env`):
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
-4. Deploy → comparte la URL con tu pareja.
-
-## Uso
+## Uso del mapa
 
 | Acción | Cómo |
 |--------|------|
-| Navegar | Gira el globo, zoom con rueda o pellizco |
-| Ver lugar | Clic en punto gris o verde |
-| Editar | Botón **Editar** → login Supabase |
-| Marcar pendiente | Estado "Por visitar" + fecha objetivo |
-| Marcar visitado | Estado "Visitado" + subir foto + fecha |
+| Navegar | Scroll, pellizco o clic en polígonos |
+| Ver ficha | Pulsa **ℹ** junto al nombre |
+| Editar | Botón **Editar** (arriba) → login |
+| Subir foto | ℹ → baja a **Editar lugar** → **Visitado** → foto → **Guardar** |
+| Collage | Sube otra foto al mismo lugar → se combina en el polígono |
+| Alejar nivel | Botón **− Alejar** |
+
+---
+
+## Preguntas frecuentes
+
+### ¿Por qué no hay puntos verdes?
+
+Las fotos **llenan el polígono** del mapa (distrito/provincia), no puntos sueltos. Esa es la idea del álbum geográfico.
+
+### ¿Por qué Perú o Utcubamba se ponían verdes si solo subí foto en Chachapoyas?
+
+Antes el color **subía al padre** (departamento/país). Ahora la foto solo aparece en el **polígono que corresponde** a ese lugar.
+
+### ¿Dónde está el formulario de fotos?
+
+1. **ℹ** en el mapa  
+2. **Editar** → login (arriba debe verse tu email)  
+3. **Desliza abajo** en el panel → **Editar lugar**  
+4. Elige **Visitado (color)** → ahí sale **Tu foto**
+
+### ¿Varias fotos en un lugar?
+
+Cada nueva foto crea otra entrada. En el mapa se muestran como **collage** dentro del mismo polígono (hasta 4 fotos).
+
+### ¿Eliminar?
+
+En **Editar lugar** → botón rojo **Eliminar** (solo si ya guardaste antes).
+
+---
 
 ## Estructura
 
 ```
 src/
-  components/   GlobeMap, PlacePanel, LoginModal, UploadForm
-  data/         Lugares Perú + GeoJSON
-  lib/          Cliente Supabase
+  components/   GlobeMap, PlacePanel, MapInfoOverlay, UploadForm
+  data/         Lugares + GeoJSON Perú
+  lib/          Supabase, collage de fotos, patrones del mapa
 supabase/
   schema.sql    Tablas y políticas RLS
 ```
 
 ## Próximas versiones
 
-- Universo con fotos al 50 % de fondo
-- Animación gris → color estilo Universal
-- Más países y fronteras reales
-- Doble factor de autenticación
+- Animación suave al aparecer la foto en el polígono
+- Panel a pantalla completa en móvil
+- Más departamentos con distritos detallados

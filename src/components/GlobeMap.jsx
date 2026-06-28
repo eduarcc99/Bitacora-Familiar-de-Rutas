@@ -1,7 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { buildPlacesGeoJSON } from '../data/places'
 import {
   buildMapInfoTargets,
   enrichPeruDepartments,
@@ -13,14 +12,16 @@ import {
   getActiveProvincesGeoJSON,
   getProvinceBounds,
   getRawPeruDepartments,
+  groupEntriesBySlug,
   isAmazonasProvinceId,
   loadDetailedProvinces,
   loadDistrictGeoJSON,
 } from '../data/regions'
 import worldCountries from '../data/world-countries.json'
 import MapInfoOverlay from './MapInfoOverlay'
+import { syncGeoJSONPhotoPatterns } from '../lib/mapPhotoPatterns'
 
-/** Fondo oscuro sin calles ni ríos — solo nuestras capas encima */
+/** Fondo oscuro sin calles ni r├¡os ÔÇö solo nuestras capas encima */
 const MAP_STYLE = {
   version: 8,
   glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
@@ -44,7 +45,7 @@ const DISTRICT_MIN_ZOOM = 10
 const PROVINCE_FOCUS_MIN_ZOOM = 7.5
 const AMAZONAS_PROVINCE_AUTO_ZOOM = 7.5
 const PROVINCE_FOCUS_MAX_ZOOM = 13
-/** Por debajo de este zoom → globo; por encima → plano (fronteras precisas) */
+/** Por debajo de este zoom ÔåÆ globo; por encima ÔåÆ plano (fronteras precisas) */
 const GLOBE_MAX_ZOOM = 3.9
 
 const districtFillColor = [
@@ -73,7 +74,7 @@ const provinceBorderPaint = {
   'line-opacity': 1,
 }
 
-/** Opacidad tipo marca de agua: aparece y desaparece según zoom */
+/** Opacidad tipo marca de agua: aparece y desaparece seg├║n zoom */
 function watermarkOpacity(inStart, inEnd, outStart, outEnd, peak = 0.92) {
   return [
     'interpolate',
@@ -212,7 +213,7 @@ const districtFillPaint = {
   },
 }
 
-/** Solo un nivel admin visible a la vez — evita líneas superpuestas */
+/** Solo un nivel admin visible a la vez ÔÇö evita l├¡neas superpuestas */
 const ZOOM_BAND = {
   deptMin: 4,
   deptMax: 7,
@@ -242,7 +243,7 @@ const provinceFillColor = [
 function addPeruProvinceLayers(
   map,
   places,
-  entriesBySlug,
+  entriesGrouped,
   onProvinceClick,
   provinceFilterId = null,
   departmentFilterName = null
@@ -250,7 +251,7 @@ function addPeruProvinceLayers(
   const provincesGeoJSON = enrichPeruProvinces(
     getActiveProvincesGeoJSON(),
     places,
-    entriesBySlug,
+    entriesGrouped,
     provinceFilterId,
     departmentFilterName
   )
@@ -302,7 +303,7 @@ function addPeruProvinceLayers(
 function addPeruDistrictLayers(
   map,
   places,
-  entriesBySlug,
+  entriesGrouped,
   onDistrictClick,
   rawDistricts,
   provinceFilterId = null
@@ -310,7 +311,7 @@ function addPeruDistrictLayers(
   const districtsGeoJSON = enrichPeruDistricts(
     rawDistricts,
     places,
-    entriesBySlug,
+    entriesGrouped,
     provinceFilterId
   )
   const beforePlaces = map.getLayer('places-glow') ? 'places-glow' : undefined
@@ -393,7 +394,7 @@ function clearGlobeAtmosphere(map) {
   map.setFog(null)
 }
 
-/** Globo alejado · plano Mercator al acercar (fronteras legibles) */
+/** Globo alejado ┬À plano Mercator al acercar (fronteras legibles) */
 function syncProjection(map, provinceFilterId) {
   if (!map?.isStyleLoaded()) return
 
@@ -425,7 +426,7 @@ function getDistrictBoundsFilter(map, provinceFilterId) {
   ]
 }
 
-/** Un solo nivel admin visible — evita líneas superpuestas al hacer zoom */
+/** Un solo nivel admin visible ÔÇö evita l├¡neas superpuestas al hacer zoom */
 function syncAdminLevelVisibility(map, provinceFilterId) {
   const focus = Boolean(provinceFilterId)
   const zoom = map.getZoom()
@@ -627,11 +628,11 @@ function applyProvinceFocusMode(map, provinceFilterId) {
   syncAdminLevelVisibility(map, provinceFilterId)
 }
 
-function addPeruRegionLayers(map, places, entriesBySlug, onRegionClick) {
+function addPeruRegionLayers(map, places, entriesGrouped, onRegionClick) {
   const regionsGeoJSON = enrichPeruDepartments(
     getRawPeruDepartments(),
     places,
-    entriesBySlug
+    entriesGrouped
   )
 
   if (!map.getSource('peru-regions')) {
@@ -682,86 +683,48 @@ function addPeruRegionLayers(map, places, entriesBySlug, onRegionClick) {
   }
 }
 
-function addPlaceLayers(map, places, entriesBySlug) {
-  const geojson = buildPlacesGeoJSON(places, entriesBySlug)
+function addPlaceLayers(map) {
+  if (map.getSource('places')) return
+  map.addSource('places', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  })
+}
 
-  if (!map.getSource('places')) {
-    map.addSource('places', { type: 'geojson', data: geojson })
+async function applyPhotoPatterns(
+  map,
+  places,
+  grouped,
+  provinceFilter,
+  departmentFilter,
+  districtGeoJSON = null
+) {
+  if (!map?.isStyleLoaded()) return
 
-    map.addLayer({
-      id: 'places-glow',
-      type: 'circle',
-      source: 'places',
-      minzoom: 8,
-      maxzoom: 11,
-      paint: {
-        'circle-radius': [
-          'interpolate',
-          ['linear'],
-          ['zoom'],
-          8,
-          ['match', ['get', 'level'], 'region', 6, 'poi', 4, 5],
-          10,
-          ['match', ['get', 'level'], 'region', 10, 'poi', 7, 8],
-        ],
-        'circle-color': [
-          'case',
-          ['==', ['get', 'visited'], true],
-          '#27ae60',
-          '#777777',
-        ],
-        'circle-opacity': 0.95,
-        'circle-stroke-width': 2,
-        'circle-stroke-color': '#ffffff',
-      },
-    })
-
-    map.addLayer({
-      id: 'places-labels',
-      type: 'symbol',
-      source: 'places',
-      layout: {
-        ...labelLayoutBase,
-        'text-field': ['get', 'name'],
-        'text-offset': [0, 1.1],
-        'text-anchor': 'top',
-        'text-size': watermarkLabels.place.size,
-      },
-      paint: {
-        'text-color': watermarkLabels.place.color,
-        'text-halo-color': watermarkLabels.place.halo,
-        'text-halo-width': 1.4,
-        'text-opacity': watermarkLabels.place.opacity,
-      },
-    })
-
-    map.on('mouseenter', 'places-glow', () => {
-      map.getCanvas().style.cursor = 'pointer'
-    })
-    map.on('mouseleave', 'places-glow', () => {
-      map.getCanvas().style.cursor = ''
-    })
-
-    map.on('click', 'places-glow', (e) => {
-      const feature = e.features?.[0]
-      if (!feature) return
-      const place = places.find((p) => p.slug === feature.properties.slug)
-      if (place) {
-        map.flyTo({
-          center: [place.lng, place.lat],
-          zoom: place.zoom ?? 8,
-          duration: 1400,
-          essential: true,
-        })
-      }
-    })
-  } else {
-    map.getSource('places').setData(geojson)
+  if (map.getSource('peru-regions')) {
+    const geo = enrichPeruDepartments(getRawPeruDepartments(), places, grouped)
+    await syncGeoJSONPhotoPatterns(map, geo, 'peru-regions', ['peru-regions-fill'])
+  }
+  if (map.getSource('peru-provinces')) {
+    const geo = enrichPeruProvinces(
+      getActiveProvincesGeoJSON(),
+      places,
+      grouped,
+      provinceFilter,
+      departmentFilter
+    )
+    await syncGeoJSONPhotoPatterns(map, geo, 'peru-provinces', ['peru-provinces-fill'])
+  }
+  if (map.getSource('peru-districts') && districtGeoJSON) {
+    await syncGeoJSONPhotoPatterns(map, districtGeoJSON, 'peru-districts', [
+      'peru-districts-fill',
+    ])
   }
 }
 
 export default function GlobeMap({
   places,
+  entries,
   entriesBySlug,
   selectedSlug,
   onOpenPanel,
@@ -785,11 +748,23 @@ export default function GlobeMap({
     boundsKey: null,
   })
   const placesRef = useRef(places)
-  const entriesRef = useRef(entriesBySlug)
+  const entriesGroupedRef = useRef(groupEntriesBySlug(entries))
   const onOpenPanelRef = useRef(onOpenPanel)
+  const lastDistrictGeoRef = useRef(null)
   placesRef.current = places
-  entriesRef.current = entriesBySlug
+  entriesGroupedRef.current = groupEntriesBySlug(entries)
   onOpenPanelRef.current = onOpenPanel
+
+  const runPhotoPatterns = useCallback(async (map, districtGeoJSON = null) => {
+    await applyPhotoPatterns(
+      map,
+      placesRef.current,
+      entriesGroupedRef.current,
+      provinceFilterRef.current,
+      departmentFilterRef.current,
+      districtGeoJSON ?? lastDistrictGeoRef.current
+    )
+  }, [])
 
   const afterClickNav = useCallback((map) => {
     map.once('moveend', () => refreshAfterNavRef.current(map))
@@ -977,7 +952,7 @@ export default function GlobeMap({
     const data = enrichPeruDistricts(
       raw,
       placesRef.current,
-      entriesRef.current,
+      entriesGroupedRef.current,
       filter,
       boundsFilter
     )
@@ -986,7 +961,9 @@ export default function GlobeMap({
     cache.districtFilter = filter
     cache.boundsKey = boundsKey
     cache.districtFeatureCount = data.features.length
-  }, [])
+    lastDistrictGeoRef.current = data
+    await runPhotoPatterns(map, data)
+  }, [runPhotoPatterns])
 
   const ensureDetailedProvinces = useCallback(async (map) => {
     if (provincesDetailedReadyRef.current) return
@@ -998,7 +975,7 @@ export default function GlobeMap({
         const provincesGeoJSON = enrichPeruProvinces(
           getActiveProvincesGeoJSON(),
           placesRef.current,
-          entriesRef.current,
+          entriesGroupedRef.current,
           provinceFilterRef.current,
           departmentFilterRef.current
         )
@@ -1056,7 +1033,7 @@ export default function GlobeMap({
       addPeruDistrictLayers(
         map,
         placesRef.current,
-        entriesRef.current,
+        entriesGroupedRef.current,
         handleDistrictClick,
         raw,
         filter
@@ -1073,7 +1050,7 @@ export default function GlobeMap({
     const provincesGeoJSON = enrichPeruProvinces(
       getActiveProvincesGeoJSON(),
       placesRef.current,
-      entriesRef.current,
+      entriesGroupedRef.current,
       provinceFilterRef.current,
       departmentFilterRef.current
     )
@@ -1106,8 +1083,9 @@ export default function GlobeMap({
       }
 
       await ensureDistrictLayers(map, Boolean(provinceFilterRef.current))
+      await runPhotoPatterns(map)
     },
-    [autoDetectAdminContext, ensureDetailedProvinces, updateProvinceData, ensureDistrictLayers]
+    [autoDetectAdminContext, ensureDetailedProvinces, updateProvinceData, ensureDistrictLayers, runPhotoPatterns]
   )
 
   useEffect(() => {
@@ -1126,20 +1104,19 @@ export default function GlobeMap({
       addPeruRegionLayers(
         map,
         placesRef.current,
-        entriesRef.current,
+        entriesGroupedRef.current,
         handleRegionClick
       )
       addPeruProvinceLayers(
         map,
         placesRef.current,
-        entriesRef.current,
+        entriesGroupedRef.current,
         handleProvinceClick,
         provinceFilterRef.current,
         departmentFilterRef.current
       )
-      addPlaceLayers(map, placesRef.current, entriesRef.current)
+      addPlaceLayers(map)
       ensureDistrictLayers(map, Boolean(provinceFilterRef.current))
-      updateDistrictData(map)
       applyProvinceFocusMode(map, provinceFilterRef.current)
     },
     [
@@ -1147,7 +1124,6 @@ export default function GlobeMap({
       handleRegionClick,
       handleProvinceClick,
       ensureDistrictLayers,
-      updateDistrictData,
     ]
   )
 
@@ -1167,12 +1143,13 @@ export default function GlobeMap({
     map.addControl(new maplibregl.NavigationControl(), 'top-right')
     map.addControl(new maplibregl.GlobeControl(), 'top-right')
 
-    map.on('load', () => {
+    map.on('load', async () => {
       applyGlobeAtmosphere(map)
       syncLayers(map)
-      ensureDistrictLayers(map)
+      await ensureDistrictLayers(map)
       syncAdminLevelVisibility(map, provinceFilterRef.current)
       syncProjection(map, provinceFilterRef.current)
+      await runPhotoPatterns(map)
       setMapReady(true)
     })
 
@@ -1228,26 +1205,24 @@ export default function GlobeMap({
   }, [syncLayers, ensureDistrictLayers, refreshAdminContext])
 
   useEffect(() => {
-    const regionsGeoJSON = enrichPeruDepartments(
-      getRawPeruDepartments(),
-      places,
-      entriesBySlug
-    )
+    const grouped = groupEntriesBySlug(entries)
+    const regionsGeoJSON = enrichPeruDepartments(getRawPeruDepartments(), places, grouped)
     const provincesGeoJSON = enrichPeruProvinces(
       getActiveProvincesGeoJSON(),
       places,
-      entriesBySlug,
+      grouped,
       provinceFilterRef.current,
       departmentFilterRef.current
     )
     setInfoTargets(buildMapInfoTargets(places, regionsGeoJSON, provincesGeoJSON))
-  }, [places, entriesBySlug])
+  }, [places, entries])
 
   useEffect(() => {
     const map = mapRef.current
     if (!map?.isStyleLoaded()) return
     syncLayers(map)
-  }, [places, entriesBySlug, syncLayers])
+    runPhotoPatterns(map)
+  }, [places, entries, syncLayers, runPhotoPatterns])
 
   useEffect(() => {
     const map = mapRef.current
@@ -1271,6 +1246,7 @@ export default function GlobeMap({
       updateProvinceData(map)
       await ensureDistrictLayers(map, Boolean(focusPlace.province_id))
       await updateDistrictData(map)
+      await runPhotoPatterns(map)
 
       applyProvinceFocusMode(map, provinceFilterRef.current)
       syncProjection(map, provinceFilterRef.current)
@@ -1298,20 +1274,7 @@ export default function GlobeMap({
 
     if (map.isStyleLoaded()) fly()
     else map.once('load', fly)
-  }, [focusPlace, ensureDistrictLayers, updateDistrictData, updateProvinceData, ensureDetailedProvinces])
-
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map?.isStyleLoaded() || !selectedSlug) return
-    if (!map.getLayer('places-glow')) return
-
-    map.setPaintProperty('places-glow', 'circle-stroke-width', [
-      'case',
-      ['==', ['get', 'slug'], selectedSlug],
-      3,
-      2,
-    ])
-  }, [selectedSlug])
+  }, [focusPlace, ensureDistrictLayers, updateDistrictData, updateProvinceData, ensureDetailedProvinces, runPhotoPatterns])
 
   return (
     <div className="globe-map-wrap">

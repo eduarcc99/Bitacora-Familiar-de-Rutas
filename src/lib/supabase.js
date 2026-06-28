@@ -53,11 +53,20 @@ export async function fetchEntries() {
 export function entriesBySlug(entries) {
   const map = {}
   for (const entry of entries) {
-    if (!map[entry.place_slug]) {
+    const cur = map[entry.place_slug]
+    if (!cur) {
       map[entry.place_slug] = entry
+      continue
     }
+    const curScore = cur.status === 'visited' && cur.photo_path ? 2 : 1
+    const newScore = entry.status === 'visited' && entry.photo_path ? 2 : 1
+    if (newScore >= curScore) map[entry.place_slug] = entry
   }
   return map
+}
+
+export function allEntriesForSlug(entries, slug) {
+  return (entries ?? []).filter((e) => e.place_slug === slug)
 }
 
 export function getPhotoPublicUrl(path) {

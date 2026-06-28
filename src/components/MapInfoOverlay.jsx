@@ -59,7 +59,7 @@ export default function MapInfoOverlay({ map, targets, onOpenPanel }) {
           aria-label={`Información: ${item.name}`}
           title={`Info — ${item.name}`}
         >
-          i
+          ℹ
         </button>
       ))}
     </div>

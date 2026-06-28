@@ -1,6 +1,7 @@
 import rawPeruDepartments from './peru-departments.json'
 import rawPeruProvinces from './peru-provinces.json'
 import { getPlaceBySlug } from './places'
+import { getPhotoPublicUrl } from '../lib/supabase'
 
 /** NOMBDEP (GeoJSON INEI) → slug en nuestra app */
 export const DEPARTMENT_TO_SLUG = {
@@ -62,7 +63,7 @@ export function isAmazonasProvinceId(provinceId) {
   return AMAZONAS_PROVINCE_IDS.includes(provinceId)
 }
 
-/** Provincia Amazonas (ID INEI) → slug en places */
+/** Provincia Amazonas (ID INEI) → slug principal en places */
 export const AMAZONAS_PROVINCE_TO_SLUG = {
   '0101': 'chachapoyas',
   '0102': 'bagua',
@@ -335,6 +336,110 @@ function isPlaceUnderRegion(place, regionSlug, places) {
   return false
 }
 
+function normalizeAdminName(name) {
+  return (
+    name
+      ?.normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() ?? ''
+  )
+}
+
+/** Agrupa todas las entradas por slug (varias fotos = collage) */
+export function groupEntriesBySlug(entries) {
+  const map = {}
+  for (const entry of entries ?? []) {
+    if (!map[entry.place_slug]) map[entry.place_slug] = []
+    map[entry.place_slug].push(entry)
+  }
+  return map
+}
+
+function photoUrlsFromEntries(entryList) {
+  return (entryList ?? [])
+    .filter((e) => e.status === 'visited' && e.photo_path)
+    .map((e) => getPhotoPublicUrl(e.photo_path))
+    .filter(Boolean)
+}
+
+function slugsForDepartment(deptName, places) {
+  const slug = departmentToSlug(deptName)
+  return slug ? [slug] : []
+}
+
+function slugsForProvince(feature, places) {
+  const provId =
+    feature.properties.province_id ||
+    feature.properties.FIRST_IDPR ||
+    feature.properties.IDPROV
+  const mapped = AMAZONAS_PROVINCE_TO_SLUG[provId]
+  if (mapped) return [mapped]
+  return places.filter((p) => p.province_id === provId).map((p) => p.slug)
+}
+
+function slugsForDistrict(feature, places) {
+  const provId =
+    feature.properties.province_id ||
+    feature.properties.FIRST_IDPR ||
+    feature.properties.IDPROV
+  const distNorm = normalizeAdminName(
+    feature.properties.NOMBDIST || feature.properties.name
+  )
+  const matched = new Set()
+
+  for (const place of places) {
+    if (place.level !== 'poi' && place.level !== 'region') continue
+
+    if (place.province_id === provId) {
+      const placeNorm = normalizeAdminName(place.name.split('(')[0])
+      if (
+        distNorm === placeNorm ||
+        distNorm.startsWith(placeNorm) ||
+        placeNorm.startsWith(distNorm.split(' ')[0])
+      ) {
+        matched.add(place.slug)
+      }
+    }
+
+    if (place.lng != null && place.lat != null) {
+      if (pointInGeometry([place.lng, place.lat], feature.geometry)) {
+        matched.add(place.slug)
+      }
+    }
+  }
+
+  return [...matched]
+}
+
+/** Fotos solo en el polígono que corresponde — sin propagar al padre */
+export function featurePhotoState(feature, places, entriesGrouped, level) {
+  let slugs = []
+  if (level === 'department') {
+    slugs = slugsForDepartment(feature.properties.NOMBDEP, places)
+  } else if (level === 'province') {
+    slugs = slugsForProvince(feature, places)
+  } else if (level === 'district') {
+    slugs = slugsForDistrict(feature, places)
+  }
+
+  const photoUrls = []
+  for (const slug of slugs) {
+    photoUrls.push(...photoUrlsFromEntries(entriesGrouped[slug]))
+  }
+
+  const uniqueUrls = [...new Set(photoUrls)]
+  return {
+    place_slugs: slugs.join(','),
+    photo_urls: uniqueUrls.length ? JSON.stringify(uniqueUrls) : '',
+    has_photo: uniqueUrls.length > 0,
+    visited: uniqueUrls.length > 0,
+    status: uniqueUrls.length > 0 ? 'visited' : 'pending',
+  }
+}
+
 export function isRegionVisited(places, entriesBySlug, regionSlug) {
   if (!regionSlug) return false
   if (entriesBySlug[regionSlug]?.status === 'visited') return true
@@ -346,12 +451,12 @@ export function isRegionVisited(places, entriesBySlug, regionSlug) {
   })
 }
 
-export function enrichPeruDepartments(rawGeoJSON, places, entriesBySlug) {
+export function enrichPeruDepartments(rawGeoJSON, places, entriesGrouped) {
   const features = rawGeoJSON.features.map((feature) => {
     const name = feature.properties.NOMBDEP
     const slug = departmentToSlug(name)
     const tracked = Boolean(slug)
-    const visited = tracked ? isRegionVisited(places, entriesBySlug, slug) : false
+    const photoState = featurePhotoState(feature, places, entriesGrouped, 'department')
 
     return {
       ...feature,
@@ -362,8 +467,7 @@ export function enrichPeruDepartments(rawGeoJSON, places, entriesBySlug) {
         slug: slug ?? '',
         region_id: feature.properties.FIRST_IDDP ?? name,
         tracked,
-        visited,
-        status: visited ? 'visited' : 'pending',
+        ...photoState,
       },
     }
   })
@@ -375,7 +479,7 @@ export function enrichPeruDepartments(rawGeoJSON, places, entriesBySlug) {
 export function enrichPeruProvinces(
   rawGeoJSON,
   places,
-  entriesBySlug,
+  entriesGrouped,
   provinceFilterId = null,
   departmentFilterName = null
 ) {
@@ -391,9 +495,7 @@ export function enrichPeruProvinces(
     const provName = feature.properties.NOMBPROV
     const deptSlug = departmentToSlug(deptName)
     const tracked = Boolean(deptSlug)
-    const visited = tracked
-      ? isRegionVisited(places, entriesBySlug, deptSlug)
-      : false
+    const photoState = featurePhotoState(feature, places, entriesGrouped, 'province')
 
     return {
       ...feature,
@@ -405,8 +507,7 @@ export function enrichPeruProvinces(
         dept_slug: deptSlug ?? '',
         province_id: feature.properties.FIRST_IDPR,
         tracked,
-        visited,
-        status: visited ? 'visited' : 'pending',
+        ...photoState,
       },
     }
   })
@@ -465,7 +566,7 @@ export async function loadPeruDistricts() {
 export function enrichPeruDistricts(
   rawGeoJSON,
   places,
-  entriesBySlug,
+  entriesGrouped,
   provinceFilterId = null,
   boundsFilter = null
 ) {
@@ -483,9 +584,7 @@ export function enrichPeruDistricts(
     const provName = feature.properties.NOMBPROV
     const deptSlug = departmentToSlug(deptName)
     const tracked = Boolean(deptSlug)
-    const visited = tracked
-      ? isRegionVisited(places, entriesBySlug, deptSlug)
-      : false
+    const photoState = featurePhotoState(feature, places, entriesGrouped, 'district')
 
     return {
       ...feature,
@@ -498,8 +597,7 @@ export function enrichPeruDistricts(
         dept_slug: deptSlug ?? '',
         district_id: feature.properties.IDDIST,
         tracked,
-        visited,
-        status: visited ? 'visited' : 'pending',
+        ...photoState,
       },
     }
   })

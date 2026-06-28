@@ -29,6 +29,7 @@ export default function UploadForm({ place, entry, user, onSaved }) {
     try {
       let photoPath = entry?.photo_path ?? null
       const file = fileRef.current?.files?.[0]
+      const addingAnother = Boolean(file && entry?.id && entry?.photo_path && status === 'visited')
 
       if (file) {
         photoPath = await uploadPhoto(file, place.slug, user.id)
@@ -44,7 +45,7 @@ export default function UploadForm({ place, entry, user, onSaved }) {
         status: finalStatus,
         targetDate: finalStatus === 'pending' ? targetDate : null,
         userId: user.id,
-        existingId: entry?.id,
+        existingId: addingAnother ? undefined : entry?.id,
       })
 
       if (fileRef.current) fileRef.current.value = ''
@@ -120,7 +121,7 @@ export default function UploadForm({ place, entry, user, onSaved }) {
             />
           </label>
           <label>
-            Tu foto
+            Tu foto {entry?.photo_path ? '(añade otra para collage en el mapa)' : ''}
             <input
               ref={fileRef}
               type="file"

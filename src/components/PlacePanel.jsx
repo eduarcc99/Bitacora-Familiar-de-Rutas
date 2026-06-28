@@ -6,6 +6,7 @@ export default function PlacePanel({
   places,
   selectedSlug,
   entry,
+  allEntries = [],
   user,
   onClose,
   onSaved,
@@ -18,7 +19,11 @@ export default function PlacePanel({
   const breadcrumb = getBreadcrumb(places, selectedSlug)
   const children = getChildren(places, selectedSlug)
   const visited = entry?.status === 'visited'
-  const photoUrl = entry?.photo_path ? getPhotoPublicUrl(entry.photo_path) : null
+  const photoEntries = allEntries.filter((e) => e.photo_path)
+  const photoUrl = photoEntries[0]
+    ? getPhotoPublicUrl(photoEntries[0].photo_path)
+    : null
+  const extraPhotos = photoEntries.slice(1)
 
   return (
     <aside className="place-panel" role="dialog" aria-label={`Lugar: ${place.name}`}>
@@ -47,7 +52,14 @@ export default function PlacePanel({
 
       <div className={`place-panel__hero ${visited ? 'place-panel__hero--visited' : 'place-panel__hero--pending'}`}>
         {photoUrl ? (
-          <img src={photoUrl} alt={place.name} className="place-panel__photo" />
+          <>
+            <img src={photoUrl} alt={place.name} className="place-panel__photo" />
+            {extraPhotos.length > 0 && (
+              <div className="place-panel__collage-hint">
+                +{extraPhotos.length} foto{extraPhotos.length > 1 ? 's' : ''} en collage del mapa
+              </div>
+            )}
+          </>
         ) : (
           <div className="place-panel__placeholder">
             <span className="place-panel__status-icon">{visited ? '★' : '○'}</span>
@@ -97,7 +109,7 @@ export default function PlacePanel({
                     aria-label={`Información de ${child.name}`}
                     title={`Info — ${child.name}`}
                   >
-                    i
+                    ℹ
                   </button>
                 </li>
               ))}
@@ -106,14 +118,21 @@ export default function PlacePanel({
         )}
 
         {user ? (
-          <UploadForm
-            place={place}
-            entry={entry}
-            user={user}
-            onSaved={onSaved}
-          />
+          <>
+            <p className="place-panel__session">
+              ✎ Sesión activa — baja a <strong>Editar lugar</strong> para subir fotos al polígono del mapa
+            </p>
+            <UploadForm
+              place={place}
+              entry={entry}
+              user={user}
+              onSaved={onSaved}
+            />
+          </>
         ) : (
-          <p className="login-hint">Inicia sesión para subir fotos o marcar visitas.</p>
+          <p className="login-hint">
+            Pulsa <strong>Editar</strong> arriba → inicia sesión → vuelve aquí con <strong>ℹ</strong> y baja al formulario
+          </p>
         )}
       </div>
     </aside>

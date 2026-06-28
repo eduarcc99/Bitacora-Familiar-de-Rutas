@@ -87,10 +87,7 @@ export default function App() {
           <div>
             <h1>Mapa de recuerdos</h1>
             <p className="brand__tag">
-              Gris = por visitar · Color = visitado · Abre{' '}
-              <a href="http://localhost:3000" className="dev-link">
-                localhost:3000
-              </a>
+              Gris = por visitar · Foto = recuerdo en el mapa · Pulsa <strong>ℹ</strong> para editar
             </p>
           </div>
         </div>
@@ -123,6 +120,7 @@ export default function App() {
       <main className="main-stage">
         <GlobeMap
           places={places}
+          entries={entries}
           entriesBySlug={entriesMap}
           selectedSlug={selectedSlug}
           onOpenPanel={handleOpenPanel}
@@ -135,6 +133,7 @@ export default function App() {
             places={places}
             selectedSlug={selectedSlug}
             entry={selectedEntry}
+            allEntries={entries.filter((e) => e.place_slug === selectedSlug)}
             user={user}
             onClose={() => setSelectedSlug(null)}
             onSaved={reloadData}
@@ -146,7 +145,7 @@ export default function App() {
 
       <footer className="hint-bar">
         <p>
-          Scroll o clic para zoom · Pulsa <strong>i</strong> junto al nombre para ver detalles · <strong>− Alejar</strong> sube un nivel
+          <strong>ℹ</strong> info · Scroll/clic zoom · Tras login baja en el panel a <strong>Editar lugar</strong>
         </p>
         <div className="hint-bar__actions">
           <button
