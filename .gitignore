@@ -17,6 +17,10 @@ dist-ssr
 .env.local
 .env.*.local
 
+# Office / temp
+*.docx
+~$*
+
 # Editor
 .vscode/*
 !.vscode/extensions.json

@@ -33,7 +33,15 @@ insert into places (slug, name, parent_slug, level, sort_order) values
   ('puno', 'Puno', 'peru', 'region', 4),
   ('titicaca', 'Lago Titicaca', 'puno', 'poi', 1),
   ('amazonas', 'Amazonas', 'peru', 'region', 5),
-  ('gocta', 'Catarata de Gocta', 'amazonas', 'poi', 1)
+  ('chachapoyas', 'Chachapoyas', 'amazonas', 'poi', 1),
+  ('bagua', 'Bagua', 'amazonas', 'poi', 2),
+  ('jumbilla', 'Jumbilla (Bongará)', 'amazonas', 'poi', 3),
+  ('nieva', 'Santa María de Nieva', 'amazonas', 'poi', 4),
+  ('lamud', 'Lámud (Luya)', 'amazonas', 'poi', 5),
+  ('mendoza-amazonas', 'Mendoza (Rodríguez de Mendoza)', 'amazonas', 'poi', 6),
+  ('bagua-grande', 'Bagua Grande (Utcubamba)', 'amazonas', 'poi', 7),
+  ('kuelap', 'Kuélap', 'chachapoyas', 'poi', 1),
+  ('gocta', 'Catarata de Gocta', 'amazonas', 'poi', 8)
 on conflict (slug) do nothing;
 
 -- Row Level Security
