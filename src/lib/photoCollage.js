@@ -1,5 +1,5 @@
 /**
- * Combina 1–4 URLs de foto en una sola imagen para fill-pattern de MapLibre.
+ * Combina N URLs de foto en una cuadrícula para fill-pattern de MapLibre.
  */
 export async function loadImage(url) {
   return new Promise((resolve, reject) => {
@@ -11,6 +11,16 @@ export async function loadImage(url) {
   })
 }
 
+function gridForCount(count) {
+  if (count <= 1) return { cols: 1, rows: 1 }
+  if (count <= 4) return { cols: 2, rows: 2 }
+  if (count <= 6) return { cols: 3, rows: 2 }
+  if (count <= 9) return { cols: 3, rows: 3 }
+  if (count <= 12) return { cols: 4, rows: 3 }
+  const cols = 4
+  return { cols, rows: Math.ceil(count / cols) }
+}
+
 export async function buildCollageImageData(urls, size = 256) {
   const canvas = document.createElement('canvas')
   canvas.width = size
@@ -19,12 +29,13 @@ export async function buildCollageImageData(urls, size = 256) {
   ctx.fillStyle = '#2a3038'
   ctx.fillRect(0, 0, size, size)
 
-  const list = urls.slice(0, 4)
+  const list = urls.filter(Boolean)
   if (!list.length) return ctx.getImageData(0, 0, size, size)
 
-  const images = await Promise.all(list.map((url) => loadImage(url).catch(() => null)))
-  const cols = list.length <= 1 ? 1 : 2
-  const rows = list.length <= 2 ? 1 : 2
+  const { cols, rows } = gridForCount(list.length)
+  const images = await Promise.all(
+    list.map((url) => loadImage(url).catch(() => null)),
+  )
   const cellW = size / cols
   const cellH = size / rows
 

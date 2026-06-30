@@ -8,10 +8,10 @@ create table if not exists places (
   sort_order int default 0
 );
 
--- Fotos y estado visitado
+-- Fotos y estado visitado (place_slug puede ser dist-UBIGEO u otro slug registrado)
 create table if not exists place_entries (
   id uuid primary key default gen_random_uuid(),
-  place_slug text not null references places(slug),
+  place_slug text not null,
   photo_path text,
   visit_date date,
   note text,
@@ -51,6 +51,16 @@ alter table place_entries enable row level security;
 drop policy if exists "Todos pueden leer lugares" on places;
 create policy "Todos pueden leer lugares"
   on places for select using (true);
+
+drop policy if exists "Auth inserta lugares" on places;
+create policy "Auth inserta lugares"
+  on places for insert
+  with check (auth.role() = 'authenticated');
+
+drop policy if exists "Auth actualiza lugares" on places;
+create policy "Auth actualiza lugares"
+  on places for update
+  using (auth.role() = 'authenticated');
 
 drop policy if exists "Todos pueden leer entradas" on place_entries;
 create policy "Todos pueden leer entradas"

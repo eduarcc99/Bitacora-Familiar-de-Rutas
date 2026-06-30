@@ -90,7 +90,25 @@ export async function uploadPhoto(file, placeSlug, userId) {
   return filePath
 }
 
+export async function ensurePlaceRecord(place) {
+  if (!supabase || !place?.slug) return
+
+  const { error } = await supabase.from('places').upsert(
+    {
+      slug: place.slug,
+      name: place.name,
+      parent_slug: place.parent_slug ?? null,
+      level: place.level ?? 'district',
+      sort_order: place.sort_order ?? 0,
+    },
+    { onConflict: 'slug' },
+  )
+
+  if (error) console.warn('No se pudo registrar lugar:', error.message)
+}
+
 export async function savePlaceEntry({
+  place,
   placeSlug,
   photoPath,
   visitDate,
@@ -101,6 +119,8 @@ export async function savePlaceEntry({
   existingId,
 }) {
   if (!supabase) throw new Error('Supabase no configurado')
+
+  if (place) await ensurePlaceRecord(place)
 
   const payload = {
     place_slug: placeSlug,
@@ -136,6 +156,21 @@ export async function deletePlaceEntry(id) {
   if (!supabase) throw new Error('Supabase no configurado')
   const { error } = await supabase.from('place_entries').delete().eq('id', id)
   if (error) throw error
+}
+
+export async function updatePlaceEntry(id, { note, visitDate } = {}) {
+  if (!supabase) throw new Error('Supabase no configurado')
+  const payload = {}
+  if (note !== undefined) payload.note = note || null
+  if (visitDate !== undefined) payload.visit_date = visitDate || null
+  const { data, error } = await supabase
+    .from('place_entries')
+    .update(payload)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) throw error
+  return data
 }
 
 export async function signIn(email, password) {

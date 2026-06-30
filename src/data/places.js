@@ -250,14 +250,20 @@ export function getPlaceBySlug(places, slug) {
   return places.find((p) => p.slug === slug);
 }
 
-export function getBreadcrumb(places, slug) {
+export function resolvePlace(places, slug) {
+  if (!slug) return null;
+  const local = getPlaceBySlug(places, slug);
+  if (local) return local;
+  return null;
+}
+
+export function getBreadcrumb(places, slug, resolveExtra) {
   const trail = [];
-  let current = getPlaceBySlug(places, slug);
+  const lookup = (s) => getPlaceBySlug(places, s) || resolveExtra?.(s) || null;
+  let current = lookup(slug);
   while (current) {
     trail.unshift(current);
-    current = current.parent_slug
-      ? getPlaceBySlug(places, current.parent_slug)
-      : null;
+    current = current.parent_slug ? lookup(current.parent_slug) : null;
   }
   return trail;
 }

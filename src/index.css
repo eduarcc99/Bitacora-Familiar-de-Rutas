@@ -1,5 +1,32 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Inter", system-ui, sans-serif;
+
+  /* Editor studio palette */
+  --color-editor-bg: #09090b;
+  --color-editor-panel: #111113;
+  --color-editor-surface: #18181b;
+  --color-editor-elevated: #27272a;
+  --color-editor-border: rgb(255 255 255 / 0.08);
+  --color-editor-border-strong: rgb(255 255 255 / 0.14);
+  --color-editor-text: #fafafa;
+  --color-editor-muted: #a1a1aa;
+  --color-editor-subtle: #71717a;
+  --color-editor-accent: #fbbf24;
+  --color-editor-accent-hover: #f59e0b;
+  --color-editor-accent-muted: rgb(251 191 36 / 0.15);
+  --color-editor-danger: #f87171;
+  --color-editor-success: #4ade80;
+
+  --shadow-editor-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-editor-md: 0 8px 30px rgb(0 0 0 / 0.45);
+  --shadow-editor-lg: 0 24px 60px rgb(0 0 0 / 0.55);
+}
+
 :root {
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans);
   line-height: 1.5;
   font-weight: 400;
   color: #e8ecf4;
@@ -7,6 +34,7 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 *,
@@ -26,10 +54,64 @@ body,
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
-button {
+button:not(:disabled) {
   cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-editor-accent);
+  outline-offset: 2px;
+}
+
+/* Scrollbar editor */
+.editor-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.editor-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.editor-scroll::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.12);
+  border-radius: 999px;
+}
+.editor-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.2);
+}
+
+@keyframes editor-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-editor-in {
+  animation: editor-fade-in 0.35s ease-out both;
+}
+
+@keyframes editor-shimmer {
+  to {
+    background-position: 200% center;
+  }
+}
+
+.editor-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgb(255 255 255 / 0.04) 0%,
+    rgb(255 255 255 / 0.08) 50%,
+    rgb(255 255 255 / 0.04) 100%
+  );
+  background-size: 200% 100%;
+  animation: editor-shimmer 1.5s ease-in-out infinite;
 }

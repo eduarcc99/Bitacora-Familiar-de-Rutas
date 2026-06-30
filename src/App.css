@@ -134,14 +134,16 @@
   color: #d4dff5;
   font-size: 12px;
   font-weight: 700;
-  font-family: Georgia, 'Times New Roman', serif;
+  font-family: Georgia, "Times New Roman", serif;
   cursor: pointer;
   line-height: 1;
   padding: 0;
   display: grid;
   place-items: center;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
-  transition: transform 0.15s ease, background 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
 }
 
 .map-info-btn:hover,

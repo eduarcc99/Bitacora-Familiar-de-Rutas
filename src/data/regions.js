@@ -1,89 +1,90 @@
-import rawPeruDepartments from './peru-departments.json'
-import rawPeruProvinces from './peru-provinces.json'
-import { getPlaceBySlug } from './places'
-import { getPhotoPublicUrl } from '../lib/supabase'
+import rawPeruDepartments from "./peru-departments.json";
+import rawPeruProvinces from "./peru-provinces.json";
+import { getPlaceBySlug } from "./places";
+import { getPhotoPublicUrl } from "../lib/supabase";
+import { getDistrictSlug } from "./districtPlaces";
 
-/** NOMBDEP (GeoJSON INEI) → slug en nuestra app */
-export const DEPARTMENT_TO_SLUG = {
-  AMAZONAS: 'amazonas',
-  AREQUIPA: 'arequipa',
-  AYACUCHO: 'ayacucho',
-  CUSCO: 'cusco',
-  LIMA: 'lima',
-  PUNO: 'puno',
-}
+import { departmentToSlug as deptToSlug, DEPARTMENT_TO_SLUG } from './departmentPlaces'
+
+export { DEPARTMENT_TO_SLUG }
 
 export function getRawPeruDepartments() {
-  return rawPeruDepartments
+  return rawPeruDepartments;
 }
 
 export function getRawPeruProvinces() {
-  return rawPeruProvinces
+  return rawPeruProvinces;
 }
 
 export function departmentToSlug(name) {
-  return DEPARTMENT_TO_SLUG[name?.toUpperCase?.()] ?? null
+  return deptToSlug(name)
 }
 
 export function filterByProvinceId(features, provinceId) {
-  if (!provinceId) return features
+  if (!provinceId) return features;
   return features.filter((feature) => {
-    const id = feature.properties.IDDIST || feature.properties.FIRST_IDPR
-    const idProv = feature.properties.IDPROV
+    const id = feature.properties.IDDIST || feature.properties.FIRST_IDPR;
+    const idProv = feature.properties.IDPROV;
     return (
       idProv === provinceId ||
       feature.properties.FIRST_IDPR === provinceId ||
-      String(id ?? '').startsWith(provinceId)
-    )
-  })
+      String(id ?? "").startsWith(provinceId)
+    );
+  });
 }
 
 export function filterByDepartmentName(features, departmentName) {
-  if (!departmentName) return features
+  if (!departmentName) return features;
   return features.filter((feature) => {
-    const dept = feature.properties.FIRST_NOMB || feature.properties.NOMBDEP
-    return dept?.toUpperCase?.() === departmentName.toUpperCase()
-  })
+    const dept = feature.properties.FIRST_NOMB || feature.properties.NOMBDEP;
+    return dept?.toUpperCase?.() === departmentName.toUpperCase();
+  });
 }
 
-export const CHACHAPOYAS_PROVINCE_ID = '0101'
+export const CHACHAPOYAS_PROVINCE_ID = "0101";
 
 /** Las 7 provincias de Amazonas (distritos detallados disponibles) */
 export const AMAZONAS_PROVINCE_IDS = [
-  '0101', // Chachapoyas
-  '0102', // Bagua
-  '0103', // Bongará
-  '0104', // Condorcanqui
-  '0105', // Luya
-  '0106', // Rodríguez de Mendoza
-  '0107', // Utcubamba
-]
+  "0101", // Chachapoyas
+  "0102", // Bagua
+  "0103", // Bongará
+  "0104", // Condorcanqui
+  "0105", // Luya
+  "0106", // Rodríguez de Mendoza
+  "0107", // Utcubamba
+];
 
 export function isAmazonasProvinceId(provinceId) {
-  return AMAZONAS_PROVINCE_IDS.includes(provinceId)
+  return AMAZONAS_PROVINCE_IDS.includes(provinceId);
 }
 
 /** Provincia Amazonas (ID INEI) → slug principal en places */
 export const AMAZONAS_PROVINCE_TO_SLUG = {
-  '0101': 'chachapoyas',
-  '0102': 'bagua',
-  '0103': 'jumbilla',
-  '0104': 'nieva',
-  '0105': 'lamud',
-  '0106': 'mendoza-amazonas',
-  '0107': 'bagua-grande',
-}
+  "0101": "chachapoyas",
+  "0102": "bagua",
+  "0103": "jumbilla",
+  "0104": "nieva",
+  "0105": "lamud",
+  "0106": "mendoza-amazonas",
+  "0107": "bagua-grande",
+};
 
-export function buildMapInfoTargets(places, regionsGeoJSON, provincesGeoJSON) {
-  const bySlug = new Map()
+export function buildMapInfoTargets(
+  places,
+  regionsGeoJSON,
+  provincesGeoJSON,
+  districtsGeoJSON = null,
+) {
+  const bySlug = new Map();
 
   const add = (target) => {
-    if (!target?.slug) return
-    if (!bySlug.has(target.slug)) bySlug.set(target.slug, target)
-  }
+    if (!target?.slug) return;
+    if (!bySlug.has(target.slug)) bySlug.set(target.slug, target);
+  };
 
   for (const place of places) {
-    const minZoom = place.level === 'country' ? 5 : place.level === 'region' ? 7.5 : 8
+    const minZoom =
+      place.level === "country" ? 5 : place.level === "region" ? 7.5 : 8;
     add({
       slug: place.slug,
       name: place.name,
@@ -91,13 +92,13 @@ export function buildMapInfoTargets(places, regionsGeoJSON, provincesGeoJSON) {
       lat: place.lat,
       minZoom,
       maxZoom: 18,
-      offsetX: place.level === 'poi' ? 34 : 40,
-      offsetY: place.level === 'poi' ? 8 : 0,
-    })
+      offsetX: place.level === "poi" ? 34 : 40,
+      offsetY: place.level === "poi" ? 8 : 0,
+    });
   }
 
   for (const feature of geoJSONToLabelPoints(regionsGeoJSON).features) {
-    if (!feature.properties.slug) continue
+    if (!feature.properties.slug) continue;
     add({
       slug: feature.properties.slug,
       name: feature.properties.name,
@@ -107,13 +108,14 @@ export function buildMapInfoTargets(places, regionsGeoJSON, provincesGeoJSON) {
       maxZoom: 6.95,
       offsetX: 44,
       offsetY: -4,
-    })
+    });
   }
 
   for (const feature of geoJSONToLabelPoints(provincesGeoJSON).features) {
-    const provId = feature.properties.province_id || feature.properties.FIRST_IDPR
-    const slug = AMAZONAS_PROVINCE_TO_SLUG[provId]
-    if (!slug) continue
+    const provId =
+      feature.properties.province_id || feature.properties.FIRST_IDPR;
+    const slug = AMAZONAS_PROVINCE_TO_SLUG[provId];
+    if (!slug) continue;
     add({
       slug,
       name: feature.properties.name,
@@ -123,79 +125,99 @@ export function buildMapInfoTargets(places, regionsGeoJSON, provincesGeoJSON) {
       maxZoom: 9.95,
       offsetX: 44,
       offsetY: -4,
-    })
+    });
   }
 
-  return [...bySlug.values()]
+  if (districtsGeoJSON?.features?.length) {
+    for (const feature of geoJSONToLabelPoints(districtsGeoJSON).features) {
+      if (!feature.properties.tracked) continue;
+      const slug =
+        feature.properties.slug || getDistrictSlug(feature.properties);
+      if (!slug) continue;
+      add({
+        slug,
+        name: feature.properties.name,
+        lng: feature.geometry.coordinates[0],
+        lat: feature.geometry.coordinates[1],
+        minZoom: 9.8,
+        maxZoom: 16,
+        offsetX: 38,
+        offsetY: 0,
+        kind: "district",
+      });
+    }
+  }
+
+  return [...bySlug.values()];
 }
 
 function pointInRing([lng, lat], ring) {
-  let inside = false
+  let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const [xi, yi] = ring[i]
-    const [xj, yj] = ring[j]
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
     const intersect =
       yi > lat !== yj > lat &&
-      lng < ((xj - xi) * (lat - yi)) / (yj - yi + 0.0) + xi
-    if (intersect) inside = !inside
+      lng < ((xj - xi) * (lat - yi)) / (yj - yi + 0.0) + xi;
+    if (intersect) inside = !inside;
   }
-  return inside
+  return inside;
 }
 
 export function pointInGeometry(point, geometry) {
-  if (!geometry) return false
-  if (geometry.type === 'Polygon') {
-    return pointInRing(point, geometry.coordinates[0])
+  if (!geometry) return false;
+  if (geometry.type === "Polygon") {
+    return pointInRing(point, geometry.coordinates[0]);
   }
-  return geometry.coordinates.some((poly) => pointInRing(point, poly[0]))
+  return geometry.coordinates.some((poly) => pointInRing(point, poly[0]));
 }
 
 export function findProvinceAtPoint(lng, lat, rawGeoJSON) {
   for (const feature of rawGeoJSON.features) {
     if (pointInGeometry([lng, lat], feature.geometry)) {
-      return feature.properties.FIRST_IDPR || feature.properties.IDPROV
+      return feature.properties.FIRST_IDPR || feature.properties.IDPROV;
     }
   }
-  return null
+  return null;
 }
 
 export function findDepartmentAtPoint(lng, lat) {
   for (const feature of rawPeruDepartments.features) {
     if (pointInGeometry([lng, lat], feature.geometry)) {
-      return feature.properties.NOMBDEP
+      return feature.properties.NOMBDEP;
     }
   }
-  return null
+  return null;
 }
 
 function featureIntersectsBBox(feature, west, south, east, north) {
-  const geometry = feature.geometry
-  if (!geometry) return false
+  const geometry = feature.geometry;
+  if (!geometry) return false;
 
   const polys =
-    geometry.type === 'Polygon'
+    geometry.type === "Polygon"
       ? [geometry.coordinates]
-      : geometry.coordinates ?? []
+      : (geometry.coordinates ?? []);
 
   for (const poly of polys) {
     for (const ring of poly) {
       for (const [lng, lat] of ring) {
         if (lng >= west && lng <= east && lat >= south && lat <= north) {
-          return true
+          return true;
         }
       }
     }
   }
-  return false
+  return false;
 }
 
 /** Solo distritos visibles en pantalla — evita 1800+ polígonos al hacer zoom local */
 export function filterFeaturesByBounds(features, bounds, paddingRatio = 0.15) {
-  if (!bounds || !features.length) return features
+  if (!bounds || !features.length) return features;
 
-  const [[west, south], [east, north]] = bounds
-  const lngPad = (east - west) * paddingRatio
-  const latPad = (north - south) * paddingRatio
+  const [[west, south], [east, north]] = bounds;
+  const lngPad = (east - west) * paddingRatio;
+  const latPad = (north - south) * paddingRatio;
 
   return features.filter((feature) =>
     featureIntersectsBBox(
@@ -203,260 +225,274 @@ export function filterFeaturesByBounds(features, bounds, paddingRatio = 0.15) {
       west - lngPad,
       south - latPad,
       east + lngPad,
-      north + latPad
-    )
-  )
+      north + latPad,
+    ),
+  );
 }
 
 export function boundsFromGeoJSON(geojson) {
-  const bounds = new maplibreglBounds()
+  const bounds = new maplibreglBounds();
   for (const feature of geojson.features) {
-    extendBoundsWithGeometry(bounds, feature.geometry)
+    extendBoundsWithGeometry(bounds, feature.geometry);
   }
-  return bounds
+  return bounds;
 }
 
 function maplibreglBounds() {
-  return { minLng: Infinity, minLat: Infinity, maxLng: -Infinity, maxLat: -Infinity, valid: false }
+  return {
+    minLng: Infinity,
+    minLat: Infinity,
+    maxLng: -Infinity,
+    maxLat: -Infinity,
+    valid: false,
+  };
 }
 
 function extendBoundsWithGeometry(bounds, geometry) {
-  if (!geometry) return
+  if (!geometry) return;
   const rings =
-    geometry.type === 'Polygon'
+    geometry.type === "Polygon"
       ? [geometry.coordinates]
-      : geometry.coordinates ?? []
+      : (geometry.coordinates ?? []);
 
   rings.forEach((poly) => {
     poly[0]?.forEach(([lng, lat]) => {
-      bounds.minLng = Math.min(bounds.minLng, lng)
-      bounds.maxLng = Math.max(bounds.maxLng, lng)
-      bounds.minLat = Math.min(bounds.minLat, lat)
-      bounds.maxLat = Math.max(bounds.maxLat, lat)
-      bounds.valid = true
-    })
-  })
+      bounds.minLng = Math.min(bounds.minLng, lng);
+      bounds.maxLng = Math.max(bounds.maxLng, lng);
+      bounds.minLat = Math.min(bounds.minLat, lat);
+      bounds.maxLat = Math.max(bounds.maxLat, lat);
+      bounds.valid = true;
+    });
+  });
 }
 
 export function boundsToLngLatBounds(bounds) {
-  if (!bounds.valid) return null
+  if (!bounds.valid) return null;
   return [
     [bounds.minLng, bounds.minLat],
     [bounds.maxLng, bounds.maxLat],
-  ]
+  ];
 }
 
 function ringCentroid(ring) {
-  if (!ring?.length) return null
-  let area = 0
-  let cx = 0
-  let cy = 0
-  const n = ring.length - 1
+  if (!ring?.length) return null;
+  let area = 0;
+  let cx = 0;
+  let cy = 0;
+  const n = ring.length - 1;
 
   for (let i = 0; i < n; i++) {
-    const [x1, y1] = ring[i]
-    const [x2, y2] = ring[i + 1]
-    const cross = x1 * y2 - x2 * y1
-    area += cross
-    cx += (x1 + x2) * cross
-    cy += (y1 + y2) * cross
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[i + 1];
+    const cross = x1 * y2 - x2 * y1;
+    area += cross;
+    cx += (x1 + x2) * cross;
+    cy += (y1 + y2) * cross;
   }
 
-  area *= 0.5
+  area *= 0.5;
   if (Math.abs(area) < 1e-12) {
-    let lng = 0
-    let lat = 0
+    let lng = 0;
+    let lat = 0;
     for (let i = 0; i < n; i++) {
-      lng += ring[i][0]
-      lat += ring[i][1]
+      lng += ring[i][0];
+      lat += ring[i][1];
     }
-    return [lng / n, lat / n]
+    return [lng / n, lat / n];
   }
 
-  return [cx / (6 * area), cy / (6 * area)]
+  return [cx / (6 * area), cy / (6 * area)];
 }
 
 function geometryCentroid(geometry) {
-  if (!geometry) return null
-  if (geometry.type === 'Polygon') {
-    return ringCentroid(geometry.coordinates[0])
+  if (!geometry) return null;
+  if (geometry.type === "Polygon") {
+    return ringCentroid(geometry.coordinates[0]);
   }
-  if (geometry.type === 'MultiPolygon') {
-    let largest = geometry.coordinates[0][0]
-    let maxLen = largest.length
+  if (geometry.type === "MultiPolygon") {
+    let largest = geometry.coordinates[0][0];
+    let maxLen = largest.length;
     for (const poly of geometry.coordinates) {
       if (poly[0].length > maxLen) {
-        maxLen = poly[0].length
-        largest = poly[0]
+        maxLen = poly[0].length;
+        largest = poly[0];
       }
     }
-    return ringCentroid(largest)
+    return ringCentroid(largest);
   }
-  return null
+  return null;
 }
 
 /** Puntos en el centro de cada polígono — etiquetas fiables en MapLibre */
 export function geoJSONToLabelPoints(geojson) {
-  const features = []
+  const features = [];
 
   for (const feature of geojson.features) {
-    const coordinates = geometryCentroid(feature.geometry)
-    if (!coordinates) continue
+    const coordinates = geometryCentroid(feature.geometry);
+    if (!coordinates) continue;
     features.push({
-      type: 'Feature',
+      type: "Feature",
       properties: feature.properties,
-      geometry: { type: 'Point', coordinates },
-    })
+      geometry: { type: "Point", coordinates },
+    });
   }
 
-  return { type: 'FeatureCollection', features }
+  return { type: "FeatureCollection", features };
 }
 
 export function getProvinceBounds(provinceId) {
-  const source = detailedProvincesCache ?? rawPeruProvinces
+  const source = detailedProvincesCache ?? rawPeruProvinces;
   const feature = source.features.find(
     (f) =>
       f.properties.FIRST_IDPR === provinceId ||
-      f.properties.IDPROV === provinceId
-  )
-  if (!feature) return null
-  const b = maplibreglBounds()
-  extendBoundsWithGeometry(b, feature.geometry)
-  return boundsToLngLatBounds(b)
+      f.properties.IDPROV === provinceId,
+  );
+  if (!feature) return null;
+  const b = maplibreglBounds();
+  extendBoundsWithGeometry(b, feature.geometry);
+  return boundsToLngLatBounds(b);
 }
 
 function isPlaceUnderRegion(place, regionSlug, places) {
-  let current = place
+  let current = place;
   while (current) {
-    if (current.slug === regionSlug) return true
+    if (current.slug === regionSlug) return true;
     current = current.parent_slug
       ? getPlaceBySlug(places, current.parent_slug)
-      : null
+      : null;
   }
-  return false
+  return false;
 }
 
 function normalizeAdminName(name) {
   return (
     name
-      ?.normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
+      ?.normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
       .toUpperCase()
-      .replace(/[^A-Z0-9\s]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim() ?? ''
-  )
+      .replace(/[^A-Z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() ?? ""
+  );
 }
 
 /** Agrupa todas las entradas por slug (varias fotos = collage) */
 export function groupEntriesBySlug(entries) {
-  const map = {}
+  const map = {};
   for (const entry of entries ?? []) {
-    if (!map[entry.place_slug]) map[entry.place_slug] = []
-    map[entry.place_slug].push(entry)
+    if (!map[entry.place_slug]) map[entry.place_slug] = [];
+    map[entry.place_slug].push(entry);
   }
-  return map
+  return map;
 }
 
 function photoUrlsFromEntries(entryList) {
   return (entryList ?? [])
-    .filter((e) => e.status === 'visited' && e.photo_path)
+    .filter((e) => e.status === "visited" && e.photo_path)
     .map((e) => getPhotoPublicUrl(e.photo_path))
-    .filter(Boolean)
+    .filter(Boolean);
 }
 
 function slugsForDepartment(deptName, places) {
-  const slug = departmentToSlug(deptName)
-  return slug ? [slug] : []
+  const slug = departmentToSlug(deptName);
+  return slug ? [slug] : [];
 }
 
 function slugsForProvince(feature, places) {
   const provId =
     feature.properties.province_id ||
     feature.properties.FIRST_IDPR ||
-    feature.properties.IDPROV
-  const mapped = AMAZONAS_PROVINCE_TO_SLUG[provId]
-  if (mapped) return [mapped]
-  return places.filter((p) => p.province_id === provId).map((p) => p.slug)
+    feature.properties.IDPROV;
+  const mapped = AMAZONAS_PROVINCE_TO_SLUG[provId];
+  if (mapped) return [mapped];
+  return places.filter((p) => p.province_id === provId).map((p) => p.slug);
 }
 
 function slugsForDistrict(feature, places) {
+  const slugs = new Set();
+  const districtSlug = getDistrictSlug(feature.properties);
+  if (districtSlug) slugs.add(districtSlug);
+
   const provId =
     feature.properties.province_id ||
     feature.properties.FIRST_IDPR ||
-    feature.properties.IDPROV
+    feature.properties.IDPROV;
   const distNorm = normalizeAdminName(
-    feature.properties.NOMBDIST || feature.properties.name
-  )
-  const matched = new Set()
+    feature.properties.NOMBDIST || feature.properties.name,
+  );
 
   for (const place of places) {
-    if (place.level !== 'poi' && place.level !== 'region') continue
+    if (place.level !== "poi" && place.level !== "region") continue;
 
     if (place.province_id === provId) {
-      const placeNorm = normalizeAdminName(place.name.split('(')[0])
+      const placeNorm = normalizeAdminName(place.name.split("(")[0]);
       if (
         distNorm === placeNorm ||
         distNorm.startsWith(placeNorm) ||
-        placeNorm.startsWith(distNorm.split(' ')[0])
+        placeNorm.startsWith(distNorm.split(" ")[0])
       ) {
-        matched.add(place.slug)
+        slugs.add(place.slug);
       }
     }
 
     if (place.lng != null && place.lat != null) {
       if (pointInGeometry([place.lng, place.lat], feature.geometry)) {
-        matched.add(place.slug)
+        slugs.add(place.slug);
       }
     }
   }
 
-  return [...matched]
+  return [...slugs];
 }
 
 /** Fotos solo en el polígono que corresponde — sin propagar al padre */
 export function featurePhotoState(feature, places, entriesGrouped, level) {
-  let slugs = []
-  if (level === 'department') {
-    slugs = slugsForDepartment(feature.properties.NOMBDEP, places)
-  } else if (level === 'province') {
-    slugs = slugsForProvince(feature, places)
-  } else if (level === 'district') {
-    slugs = slugsForDistrict(feature, places)
+  let slugs = [];
+  if (level === "department") {
+    slugs = slugsForDepartment(feature.properties.NOMBDEP, places);
+  } else if (level === "province") {
+    slugs = slugsForProvince(feature, places);
+  } else if (level === "district") {
+    slugs = slugsForDistrict(feature, places);
   }
 
-  const photoUrls = []
+  const photoUrls = [];
   for (const slug of slugs) {
-    photoUrls.push(...photoUrlsFromEntries(entriesGrouped[slug]))
+    photoUrls.push(...photoUrlsFromEntries(entriesGrouped[slug]));
   }
 
-  const uniqueUrls = [...new Set(photoUrls)]
+  const uniqueUrls = [...new Set(photoUrls)];
   return {
-    place_slugs: slugs.join(','),
-    photo_urls: uniqueUrls.length ? JSON.stringify(uniqueUrls) : '',
+    place_slugs: slugs.join(","),
+    photo_urls: uniqueUrls.length ? JSON.stringify(uniqueUrls) : "",
     has_photo: uniqueUrls.length > 0,
     visited: uniqueUrls.length > 0,
-    status: uniqueUrls.length > 0 ? 'visited' : 'pending',
-  }
+    status: uniqueUrls.length > 0 ? "visited" : "pending",
+  };
 }
 
 export function isRegionVisited(places, entriesBySlug, regionSlug) {
-  if (!regionSlug) return false
-  if (entriesBySlug[regionSlug]?.status === 'visited') return true
+  if (!regionSlug) return false;
+  if (entriesBySlug[regionSlug]?.status === "visited") return true;
 
   return places.some((place) => {
-    if (place.level === 'country') return false
-    if (entriesBySlug[place.slug]?.status !== 'visited') return false
-    return isPlaceUnderRegion(place, regionSlug, places)
-  })
+    if (place.level === "country") return false;
+    if (entriesBySlug[place.slug]?.status !== "visited") return false;
+    return isPlaceUnderRegion(place, regionSlug, places);
+  });
 }
 
 export function enrichPeruDepartments(rawGeoJSON, places, entriesGrouped) {
   const features = rawGeoJSON.features.map((feature) => {
-    const name = feature.properties.NOMBDEP
-    const slug = departmentToSlug(name)
-    const tracked = Boolean(slug)
-    const photoState = featurePhotoState(feature, places, entriesGrouped, 'department')
+    const name = feature.properties.NOMBDEP;
+    const slug = departmentToSlug(name);
+    const tracked = Boolean(slug);
+    const photoState = featurePhotoState(
+      feature,
+      places,
+      entriesGrouped,
+      "department",
+    );
 
     return {
       ...feature,
@@ -464,15 +500,15 @@ export function enrichPeruDepartments(rawGeoJSON, places, entriesGrouped) {
       properties: {
         ...feature.properties,
         name,
-        slug: slug ?? '',
+        slug: slug ?? "",
         region_id: feature.properties.FIRST_IDDP ?? name,
         tracked,
         ...photoState,
       },
-    }
-  })
+    };
+  });
 
-  return { type: 'FeatureCollection', features }
+  return { type: "FeatureCollection", features };
 }
 
 /** Provincias heredan visitado/pendiente del departamento padre */
@@ -481,21 +517,26 @@ export function enrichPeruProvinces(
   places,
   entriesGrouped,
   provinceFilterId = null,
-  departmentFilterName = null
+  departmentFilterName = null,
 ) {
-  let baseFeatures = rawGeoJSON.features
+  let baseFeatures = rawGeoJSON.features;
   if (provinceFilterId) {
-    baseFeatures = filterByProvinceId(baseFeatures, provinceFilterId)
+    baseFeatures = filterByProvinceId(baseFeatures, provinceFilterId);
   } else if (departmentFilterName) {
-    baseFeatures = filterByDepartmentName(baseFeatures, departmentFilterName)
+    baseFeatures = filterByDepartmentName(baseFeatures, departmentFilterName);
   }
 
   const features = baseFeatures.map((feature) => {
-    const deptName = feature.properties.FIRST_NOMB
-    const provName = feature.properties.NOMBPROV
-    const deptSlug = departmentToSlug(deptName)
-    const tracked = Boolean(deptSlug)
-    const photoState = featurePhotoState(feature, places, entriesGrouped, 'province')
+    const deptName = feature.properties.FIRST_NOMB;
+    const provName = feature.properties.NOMBPROV;
+    const deptSlug = departmentToSlug(deptName);
+    const tracked = Boolean(deptSlug);
+    const photoState = featurePhotoState(
+      feature,
+      places,
+      entriesGrouped,
+      "province",
+    );
 
     return {
       ...feature,
@@ -504,63 +545,64 @@ export function enrichPeruProvinces(
         ...feature.properties,
         name: provName,
         department: deptName,
-        dept_slug: deptSlug ?? '',
+        dept_slug: deptSlug ?? "",
         province_id: feature.properties.FIRST_IDPR,
         tracked,
         ...photoState,
       },
-    }
-  })
+    };
+  });
 
-  return { type: 'FeatureCollection', features }
+  return { type: "FeatureCollection", features };
 }
 
-let rawDistrictsCache = null
-let detailedProvincesCache = null
-let amazonasDistrictsCache = null
-let chachapoyasDistrictsCache = null
+let rawDistrictsCache = null;
+let detailedProvincesCache = null;
+let amazonasDistrictsCache = null;
+let chachapoyasDistrictsCache = null;
 
 export function getActiveProvincesGeoJSON() {
-  return detailedProvincesCache ?? rawPeruProvinces
+  return detailedProvincesCache ?? rawPeruProvinces;
 }
 
 export async function loadDetailedProvinces() {
-  if (detailedProvincesCache) return detailedProvincesCache
-  const res = await fetch('/data/peru-provinces-detailed.json')
-  if (!res.ok) throw new Error('No se pudieron cargar provincias detalladas')
-  detailedProvincesCache = await res.json()
-  return detailedProvincesCache
+  if (detailedProvincesCache) return detailedProvincesCache;
+  const res = await fetch("/data/peru-provinces-detailed.json");
+  if (!res.ok) throw new Error("No se pudieron cargar provincias detalladas");
+  detailedProvincesCache = await res.json();
+  return detailedProvincesCache;
 }
 
 export async function loadAmazonasDistricts() {
-  if (amazonasDistrictsCache) return amazonasDistrictsCache
-  const res = await fetch('/data/amazonas-districts.json')
-  if (!res.ok) throw new Error('No se pudieron cargar distritos de Amazonas')
-  amazonasDistrictsCache = await res.json()
-  return amazonasDistrictsCache
+  if (amazonasDistrictsCache) return amazonasDistrictsCache;
+  const res = await fetch("/data/amazonas-districts.json");
+  if (!res.ok) throw new Error("No se pudieron cargar distritos de Amazonas");
+  amazonasDistrictsCache = await res.json();
+  return amazonasDistrictsCache;
 }
 
 export async function loadChachapoyasDistricts() {
-  if (chachapoyasDistrictsCache) return chachapoyasDistrictsCache
-  const res = await fetch('/data/chachapoyas-districts.json')
-  if (!res.ok) throw new Error('No se pudieron cargar distritos de Chachapoyas')
-  chachapoyasDistrictsCache = await res.json()
-  return chachapoyasDistrictsCache
+  if (chachapoyasDistrictsCache) return chachapoyasDistrictsCache;
+  const res = await fetch("/data/chachapoyas-districts.json");
+  if (!res.ok)
+    throw new Error("No se pudieron cargar distritos de Chachapoyas");
+  chachapoyasDistrictsCache = await res.json();
+  return chachapoyasDistrictsCache;
 }
 
 export async function loadDistrictGeoJSON(provinceFilterId = null) {
   if (isAmazonasProvinceId(provinceFilterId)) {
-    return loadAmazonasDistricts()
+    return loadAmazonasDistricts();
   }
-  return loadPeruDistricts()
+  return loadPeruDistricts();
 }
 
 export async function loadPeruDistricts() {
-  if (rawDistrictsCache) return rawDistrictsCache
-  const res = await fetch('/data/peru-districts.json')
-  if (!res.ok) throw new Error('No se pudieron cargar distritos')
-  rawDistrictsCache = await res.json()
-  return rawDistrictsCache
+  if (rawDistrictsCache) return rawDistrictsCache;
+  const res = await fetch("/data/peru-districts.json");
+  if (!res.ok) throw new Error("No se pudieron cargar distritos");
+  rawDistrictsCache = await res.json();
+  return rawDistrictsCache;
 }
 
 export function enrichPeruDistricts(
@@ -568,23 +610,29 @@ export function enrichPeruDistricts(
   places,
   entriesGrouped,
   provinceFilterId = null,
-  boundsFilter = null
+  boundsFilter = null,
 ) {
   let baseFeatures = provinceFilterId
     ? filterByProvinceId(rawGeoJSON.features, provinceFilterId)
-    : rawGeoJSON.features
+    : rawGeoJSON.features;
 
   if (!provinceFilterId && boundsFilter) {
-    baseFeatures = filterFeaturesByBounds(baseFeatures, boundsFilter)
+    baseFeatures = filterFeaturesByBounds(baseFeatures, boundsFilter);
   }
 
   const features = baseFeatures.map((feature) => {
-    const deptName = feature.properties.NOMBDEP
-    const distName = feature.properties.NOMBDIST
-    const provName = feature.properties.NOMBPROV
-    const deptSlug = departmentToSlug(deptName)
-    const tracked = Boolean(deptSlug)
-    const photoState = featurePhotoState(feature, places, entriesGrouped, 'district')
+    const deptName = feature.properties.NOMBDEP;
+    const distName = feature.properties.NOMBDIST;
+    const provName = feature.properties.NOMBPROV;
+    const deptSlug = departmentToSlug(deptName);
+    const tracked = Boolean(deptSlug);
+    const districtSlug = getDistrictSlug(feature.properties);
+    const photoState = featurePhotoState(
+      feature,
+      places,
+      entriesGrouped,
+      "district",
+    );
 
     return {
       ...feature,
@@ -592,15 +640,16 @@ export function enrichPeruDistricts(
       properties: {
         ...feature.properties,
         name: distName,
+        slug: districtSlug ?? "",
         province: provName,
         department: deptName,
-        dept_slug: deptSlug ?? '',
+        dept_slug: deptSlug ?? "",
         district_id: feature.properties.IDDIST,
         tracked,
         ...photoState,
       },
-    }
-  })
+    };
+  });
 
-  return { type: 'FeatureCollection', features }
+  return { type: "FeatureCollection", features };
 }

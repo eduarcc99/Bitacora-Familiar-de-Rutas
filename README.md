@@ -17,10 +17,10 @@ Catálogo personal de fotos sobre un **globo MapLibre**: lugares en **gris** (po
 
 ### Políticas del bucket `photos`
 
-| Operación | Quién |
-|-----------|--------|
-| SELECT | Público |
-| INSERT | Authenticated |
+| Operación | Quién         |
+| --------- | ------------- |
+| SELECT    | Público       |
+| INSERT    | Authenticated |
 
 ## 2. Variables de entorno
 
@@ -56,14 +56,14 @@ Ver commits en [Bitacora-Familiar-de-Rutas](https://github.com/eduarcc99/Bitacor
 
 ## Uso del mapa
 
-| Acción | Cómo |
-|--------|------|
-| Navegar | Scroll, pellizco o clic en polígonos |
-| Ver ficha | Pulsa **ℹ** junto al nombre |
-| Editar | Botón **Editar** (arriba) → login |
-| Subir foto | ℹ → baja a **Editar lugar** → **Visitado** → foto → **Guardar** |
-| Collage | Sube otra foto al mismo lugar → se combina en el polígono |
-| Alejar nivel | Botón **− Alejar** |
+| Acción       | Cómo                                                            |
+| ------------ | --------------------------------------------------------------- |
+| Navegar      | Scroll, pellizco o clic en polígonos                            |
+| Editar       | Botón **Editar** (arriba) → login                               |
+| Editar distrito | Acerca hasta ver distritos → pulsa **✎** en Levanto, Chachapoyas, etc. |
+| Subir foto   | **✎** o clic en el distrito → **Visitado** → foto → **Guardar** |
+| Collage      | Misma ficha **✎** → otra foto → **Guardar** otra vez (sin borrar la 1ª) |
+| Alejar nivel | Botón **− Alejar**                                              |
 
 ---
 
@@ -79,14 +79,20 @@ Antes el color **subía al padre** (departamento/país). Ahora la foto solo apar
 
 ### ¿Dónde está el formulario de fotos?
 
-1. **ℹ** en el mapa  
-2. **Editar** → login (arriba debe verse tu email)  
-3. **Desliza abajo** en el panel → **Editar lugar**  
-4. Elige **Visitado (color)** → ahí sale **Tu foto**
+1. Acerca el mapa hasta ver **distritos** (Amazonas → provincia → distritos).
+2. Pulsa **✎** sobre el distrito (Levanto, Chachapoyas, Sonche…).
+3. **Editar** (arriba) → login si hace falta.
+4. Baja a **Editar lugar** → **Visitado (color)** → **Tu foto** → **Guardar**.
 
-### ¿Varias fotos en un lugar?
+### ¿Varias fotos en un distrito (collage)?
 
-Cada nueva foto crea otra entrada. En el mapa se muestran como **collage** dentro del mismo polígono (hasta 4 fotos).
+Cada **Guardar** con una foto nueva crea otra entrada en **ese mismo distrito**. En el mapa se combinan en **collage** dentro del polígono (tantas fotos como subas).
+
+Importante: la foto queda en el **distrito que editaste** (✎ en Levanto → solo polígono Levanto), no en toda la provincia.
+
+### ¿Supabase ya existía antes de distritos editables?
+
+Ejecuta una vez `supabase/migrate-districts.sql` en el SQL Editor.
 
 ### ¿Eliminar?
 

@@ -38,6 +38,7 @@ export default function UploadForm({ place, entry, user, onSaved }) {
       const finalStatus = status === 'visited' && photoPath ? 'visited' : status
 
       await savePlaceEntry({
+        place,
         placeSlug: place.slug,
         photoPath,
         visitDate: finalStatus === 'visited' ? visitDate : null,
@@ -121,7 +122,10 @@ export default function UploadForm({ place, entry, user, onSaved }) {
             />
           </label>
           <label>
-            Tu foto {entry?.photo_path ? '(añade otra para collage en el mapa)' : ''}
+            Tu foto{' '}
+            {entry?.photo_path
+              ? '(Guardar otra vez = nueva foto en collage del polígono)'
+              : ''}
             <input
               ref={fileRef}
               type="file"
