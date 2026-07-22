@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import GlobeMap from "./components/GlobeMap";
 import PlacePanel from "./components/PlacePanel";
+import ChachapoyasFilterBar from "./components/ChachapoyasFilterBar";
 import GalleryEditor from "./components/gallery/GalleryEditor";
 import LoginModal from "./components/LoginModal";
 import {
@@ -12,20 +13,28 @@ import {
   onAuthChange,
   signOut,
 } from "./lib/supabase";
-import { DEFAULT_PLACES, getPlaceBySlug } from "./data/places";
+import { DEFAULT_PLACES } from "./data/places";
+import { filterFromSlug } from "./lib/placeCatalog";
+import {
+  clampFilterToChachapoyas,
+  MAP_SCOPE_CHACHAPOYAS,
+  VISITOR_INITIAL_FILTER,
+} from "./lib/mapScope";
 import "./App.css";
 
 export default function App() {
   const [places, setPlaces] = useState(DEFAULT_PLACES);
   const [entries, setEntries] = useState([]);
   const [selectedSlug, setSelectedSlug] = useState(null);
-  const [focusPlace, setFocusPlace] = useState(null);
+  const [mapFilter, setMapFilter] = useState({ ...VISITOR_INITIAL_FILTER });
   const [user, setUser] = useState(null);
   const [loginOpen, setLoginOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [gallerySlug, setGallerySlug] = useState(null);
   const [loading, setLoading] = useState(true);
-  const mapNavRef = useRef(null);
+  const placesRef = useRef(places);
+
+  placesRef.current = places;
 
   const entriesMap = mapEntriesBySlug(entries);
   const selectedEntry = selectedSlug ? entriesMap[selectedSlug] : null;
@@ -53,8 +62,7 @@ export default function App() {
     init();
     const unsub = onAuthChange((u) => {
       setUser(u);
-      if (u) setGalleryOpen(true);
-      else setGalleryOpen(false);
+      if (!u) setGalleryOpen(false);
     });
     return () => {
       mounted = false;
@@ -62,18 +70,19 @@ export default function App() {
     };
   }, [reloadData]);
 
+  const handleMapFilterChange = useCallback((nextFilter) => {
+    setMapFilter(clampFilterToChachapoyas(nextFilter));
+  }, []);
+
   function handleOpenPanel(slug) {
     if (isEditing) return;
     setSelectedSlug(slug);
-  }
-
-  function handleFocus(place) {
-    if (isEditing) return;
-    setFocusPlace({ ...place, _t: Date.now() });
+    setMapFilter(clampFilterToChachapoyas(filterFromSlug(placesRef.current, slug)));
   }
 
   function handleNavigate(slug) {
     setSelectedSlug(slug);
+    setMapFilter(clampFilterToChachapoyas(filterFromSlug(placesRef.current, slug)));
   }
 
   async function handleSignOut() {
@@ -99,7 +108,7 @@ export default function App() {
           <div>
             <h1>Mapa de recuerdos</h1>
             <p className="brand__tag">
-              Gris = por visitar · Foto = recuerdo · Pulsa{" "}
+              Chachapoyas · Gris = por visitar · Foto = recuerdo ·{" "}
               <strong>Editar</strong> para subir fotos
             </p>
           </div>
@@ -160,9 +169,10 @@ export default function App() {
               entries={entries}
               entriesBySlug={entriesMap}
               selectedSlug={selectedSlug}
+              mapFilter={mapFilter}
+              onMapFilterChange={handleMapFilterChange}
               onOpenPanel={handleOpenPanel}
-              focusPlace={focusPlace}
-              mapNavRef={mapNavRef}
+              scope={MAP_SCOPE_CHACHAPOYAS}
             />
 
             {selectedSlug && (
@@ -176,7 +186,6 @@ export default function App() {
                 user={user}
                 onClose={() => setSelectedSlug(null)}
                 onNavigate={handleNavigate}
-                onFocus={handleFocus}
                 onOpenGallery={(slug) => {
                   setGallerySlug(slug);
                   setGalleryOpen(true);
@@ -189,68 +198,11 @@ export default function App() {
       </main>
 
       {!isEditing && (
-        <footer className="hint-bar">
-          <p>
-            {user
-              ? "Vista del mapa · Pulsa Mi galería para editar fotos"
-              : "Scroll/clic zoom · Inicia sesión con Editar para subir fotos"}
-          </p>
-          <div className="hint-bar__actions">
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm"
-              onClick={() => mapNavRef.current?.zoomOut()}
-            >
-              − Alejar
-            </button>
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm"
-              onClick={() => {
-                const peru = getPlaceBySlug(places, "peru");
-                if (peru) handleFocus({ ...peru, province_id: undefined });
-              }}
-            >
-              Ir a Perú
-            </button>
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm"
-              onClick={() => {
-                const amazonas = getPlaceBySlug(places, "amazonas");
-                if (amazonas)
-                  handleFocus({ ...amazonas, province_id: undefined });
-              }}
-            >
-              Amazonas
-            </button>
-            <label className="hint-bar__select-wrap">
-              <span className="sr-only">Provincia de Amazonas</span>
-              <select
-                className="hint-bar__select"
-                defaultValue=""
-                onChange={(e) => {
-                  const slug = e.target.value;
-                  if (!slug) return;
-                  const place = getPlaceBySlug(places, slug);
-                  if (place) {
-                    handleFocus(place);
-                  }
-                  e.target.value = "";
-                }}
-              >
-                <option value="">Provincia…</option>
-                <option value="chachapoyas">Chachapoyas</option>
-                <option value="bagua">Bagua</option>
-                <option value="jumbilla">Bongará (Jumbilla)</option>
-                <option value="nieva">Condorcanqui (Nieva)</option>
-                <option value="lamud">Luya (Lámud)</option>
-                <option value="mendoza-amazonas">Rodríguez de Mendoza</option>
-                <option value="bagua-grande">Utcubamba (Bagua Grande)</option>
-              </select>
-            </label>
-          </div>
-        </footer>
+        <ChachapoyasFilterBar
+          places={places}
+          filter={mapFilter}
+          onChange={handleMapFilterChange}
+        />
       )}
 
       <LoginModal

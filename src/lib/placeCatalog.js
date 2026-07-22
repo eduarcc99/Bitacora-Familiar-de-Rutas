@@ -156,6 +156,16 @@ export function filterFromSlug(places, slug) {
     return filter
   }
 
+  if (place.level === 'district') {
+    filter.district = place.slug
+    const parentProv = resolveCatalogPlace(places, place.parent_slug)
+    if (parentProv?.province_id) {
+      filter.province = parentProv.slug
+      filter.region = 'amazonas'
+    }
+    return filter
+  }
+
   const trail = getCatalogBreadcrumb(places, slug)
 
   for (const item of trail) {

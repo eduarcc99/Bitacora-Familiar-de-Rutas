@@ -2,7 +2,6 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
-  buildMapInfoTargets,
   enrichPeruDepartments,
   enrichPeruDistricts,
   enrichPeruProvinces,
@@ -10,7 +9,6 @@ import {
   findProvinceAtPoint,
   geoJSONToLabelPoints,
   getActiveProvincesGeoJSON,
-  getProvinceBounds,
   getRawPeruDepartments,
   groupEntriesBySlug,
   isAmazonasProvinceId,
@@ -18,12 +16,30 @@ import {
   loadDistrictGeoJSON,
 } from "../data/regions";
 import worldCountries from "../data/world-countries.json";
-import MapInfoOverlay from "./MapInfoOverlay";
 import { syncGeoJSONPhotoPatterns } from "../lib/mapPhotoPatterns";
 import {
   getDistrictSlug,
   registerDistrictGeoJSON,
 } from "../data/districtPlaces";
+import { departmentToSlug } from "../data/departmentPlaces";
+import { EMPTY_FILTER, filterFromSlug } from "../lib/placeCatalog";
+import {
+  expandBoundsForMax,
+  filterFromProvinceFeature,
+  filterKey,
+  filterToAdminRefs,
+  getBoundsForFilter,
+  GLOBE_VIEW,
+  isValidBounds,
+  normalizeBounds,
+} from "../lib/mapNavigation";
+import {
+  CHACHAPOYAS_CENTER,
+  CHACHAPOYAS_PROVINCE_ID,
+  CHACHAPOYAS_ZOOM,
+  clampFilterToChachapoyas,
+  isChachapoyasScope,
+} from "../lib/mapScope";
 
 /** Fondo oscuro sin calles ni r├¡os ÔÇö solo nuestras capas encima */
 const MAP_STYLE = {
@@ -39,11 +55,9 @@ const MAP_STYLE = {
   ],
 };
 
-const PERU_ZOOM = 5.5;
-const PERU_CENTER = [-75.5, -9.2];
-const AMAZONAS_CENTER = [-77.87, -6.23];
-const GLOBE_ZOOM = 1.8;
-const GLOBE_CENTER = [-75, -15];
+const GLOBE_ZOOM = GLOBE_VIEW.zoom;
+const GLOBE_CENTER = GLOBE_VIEW.center;
+
 const DISTRICT_MIN_ZOOM = 10;
 /** Chachapoyas: distritos visibles antes (solo esa provincia) */
 const PROVINCE_FOCUS_MIN_ZOOM = 7.5;
@@ -240,8 +254,8 @@ const districtFillPaint = {
 /** Solo un nivel admin visible a la vez ÔÇö evita l├¡neas superpuestas */
 const ZOOM_BAND = {
   deptMin: 4,
-  deptMax: 7,
-  provMin: 7,
+  deptMax: 7.5,
+  provMin: 7.5,
   provMax: 10,
   distMin: 10,
 };
@@ -251,8 +265,8 @@ const regionFillColor = [
   ["==", ["get", "visited"], true],
   "#2ecc71",
   ["==", ["get", "tracked"], true],
-  "#5a5a5a",
-  "#3a4255",
+  "#4a5058",
+  "#2e3440",
 ];
 
 const provinceFillColor = [
@@ -260,8 +274,8 @@ const provinceFillColor = [
   ["==", ["get", "visited"], true],
   "#24854a",
   ["==", ["get", "tracked"], true],
-  "#454545",
-  "#323848",
+  "#40454e",
+  "#2a3038",
 ];
 
 function addPeruProvinceLayers(
@@ -292,8 +306,13 @@ function addPeruProvinceLayers(
       type: "fill",
       source: "peru-provinces",
       paint: {
-        "fill-color": fillWithHover(provinceFillColor, "#4d5668"),
-        "fill-opacity": 0.72,
+        "fill-color": fillWithHover(provinceFillColor, "#5c6a7e"),
+        "fill-opacity": [
+          "case",
+          ["boolean", ["feature-state", "hover"], false],
+          0.88,
+          0.72,
+        ],
       },
     });
 
@@ -419,7 +438,7 @@ function applyGlobeAtmosphere(map) {
     "high-color": "#141a30",
     "horizon-blend": 0.07,
     "space-color": "#000005",
-    "star-intensity": 0.55,
+    "star-intensity": 0.72,
   });
 }
 
@@ -706,8 +725,13 @@ function addPeruRegionLayers(map, places, entriesGrouped, onRegionClick) {
       type: "fill",
       source: "peru-regions",
       paint: {
-        "fill-color": fillWithHover(regionFillColor, "#5a6880"),
-        "fill-opacity": 0.78,
+        "fill-color": fillWithHover(regionFillColor, "#5a6878"),
+        "fill-opacity": [
+          "case",
+          ["boolean", ["feature-state", "hover"], false],
+          0.92,
+          0.78,
+        ],
       },
     });
 
@@ -790,15 +814,14 @@ export default function GlobeMap({
   entries,
   entriesBySlug,
   selectedSlug,
+  mapFilter = EMPTY_FILTER,
+  onMapFilterChange,
   onOpenPanel,
-  focusPlace,
-  mapNavRef,
+  scope = null,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
-  const [infoTargets, setInfoTargets] = useState([]);
-  const [districtInfoGeo, setDistrictInfoGeo] = useState(null);
   const districtsReadyRef = useRef(false);
   const provincesDetailedReadyRef = useRef(false);
   const provinceFilterRef = useRef(null);
@@ -814,10 +837,17 @@ export default function GlobeMap({
   const placesRef = useRef(places);
   const entriesGroupedRef = useRef(groupEntriesBySlug(entries));
   const onOpenPanelRef = useRef(onOpenPanel);
+  const onMapFilterChangeRef = useRef(onMapFilterChange);
+  const scopeRef = useRef(scope);
+  const appliedNavKeyRef = useRef("");
+  const navGenerationRef = useRef(0);
+  const navBusyRef = useRef(false);
   const lastDistrictGeoRef = useRef(null);
   placesRef.current = places;
   entriesGroupedRef.current = groupEntriesBySlug(entries);
   onOpenPanelRef.current = onOpenPanel;
+  onMapFilterChangeRef.current = onMapFilterChange;
+  scopeRef.current = scope;
 
   const runPhotoPatterns = useCallback(async (map, districtGeoJSON = null) => {
     await applyPhotoPatterns(
@@ -830,12 +860,23 @@ export default function GlobeMap({
     );
   }, []);
 
-  const afterClickNav = useCallback((map) => {
-    map.once("moveend", () => refreshAfterNavRef.current(map));
+  const applyFilterToMapRef = useRef(null);
+
+  const navigateFromFilter = useCallback((filter, boundsOverride = null) => {
+    const map = mapRef.current;
+    let safe = filter ?? EMPTY_FILTER;
+    if (isChachapoyasScope(scopeRef.current)) {
+      safe = clampFilterToChachapoyas(safe);
+    }
+    if (!safe.country && !boundsOverride) return;
+    if (!map) return;
+    applyFilterToMapRef.current?.(map, safe, boundsOverride);
+    onMapFilterChangeRef.current?.(safe);
   }, []);
 
   const handleWorldClick = useCallback(
     (e) => {
+      if (isChachapoyasScope(scopeRef.current)) return;
       const map = mapRef.current;
       const feature = e.features?.[0];
       if (!map || !feature) return;
@@ -844,81 +885,48 @@ export default function GlobeMap({
       const iso = feature.properties.ISO_A3 || feature.properties.ADM0_A3;
       if (admin !== "Peru" && iso !== "PER") return;
 
-      pinnedFocusRef.current = false;
-      provinceFilterRef.current = null;
-      departmentFilterRef.current = null;
-
-      map.flyTo({
-        center: PERU_CENTER,
-        zoom: PERU_ZOOM,
-        duration: 1400,
-        essential: true,
-      });
-      afterClickNav(map);
+      navigateFromFilter({ ...EMPTY_FILTER, country: "peru" });
     },
-    [afterClickNav],
+    [navigateFromFilter],
   );
 
   const handleRegionClick = useCallback(
     (e) => {
+      if (isChachapoyasScope(scopeRef.current)) return;
       const map = mapRef.current;
       const feature = e.features?.[0];
       if (!map || !feature) return;
 
-      const { slug } = feature.properties;
-      if (slug) {
-        if (slug === "amazonas") {
-          pinnedFocusRef.current = false;
-          provinceFilterRef.current = null;
-          departmentFilterRef.current = "AMAZONAS";
-        }
-        const place = placesRef.current.find((p) => p.slug === slug);
-        if (place) {
-          map.flyTo({
-            center: [place.lng, place.lat],
-            zoom: place.zoom ?? 7,
-            duration: 1400,
-            essential: true,
-          });
-          afterClickNav(map);
-          return;
-        }
-      }
+      const slug =
+        feature.properties.slug ||
+        departmentToSlug(feature.properties.NOMBDEP);
+      if (!slug) return;
 
-      map.fitBounds(featureBounds(feature.geometry), {
-        padding: 60,
-        duration: 1400,
-      });
-      afterClickNav(map);
+      let filter = filterFromSlug(placesRef.current, slug);
+      if (!filter.country) {
+        filter = {
+          country: "peru",
+          region: slug,
+          province: null,
+          district: null,
+        };
+      }
+      navigateFromFilter(filter, featureBounds(feature.geometry));
     },
-    [afterClickNav],
+    [navigateFromFilter],
   );
 
   const handleProvinceClick = useCallback(
     (e) => {
+      if (isChachapoyasScope(scopeRef.current)) return;
       const map = mapRef.current;
       const feature = e.features?.[0];
       if (!map || !feature) return;
 
-      const provId =
-        feature.properties.province_id ||
-        feature.properties.FIRST_IDPR ||
-        feature.properties.IDPROV;
-
-      if (provId && isAmazonasProvinceId(provId)) {
-        pinnedFocusRef.current = false;
-        provinceFilterRef.current = provId;
-        departmentFilterRef.current = "AMAZONAS";
-      }
-
-      map.fitBounds(featureBounds(feature.geometry), {
-        padding: 50,
-        duration: 1200,
-        maxZoom: isAmazonasProvinceId(provId) ? 11 : 9.5,
-      });
-      afterClickNav(map);
+      const filter = filterFromProvinceFeature(placesRef.current, feature);
+      navigateFromFilter(filter, featureBounds(feature.geometry));
     },
-    [afterClickNav],
+    [navigateFromFilter],
   );
 
   const handleDistrictClick = useCallback(
@@ -929,72 +937,14 @@ export default function GlobeMap({
 
       const slug =
         feature.properties.slug || getDistrictSlug(feature.properties);
-      if (slug) {
-        onOpenPanelRef.current?.(slug);
-      }
+      if (!slug) return;
 
-      map.fitBounds(featureBounds(feature.geometry), {
-        padding: 40,
-        duration: 1000,
-        maxZoom: 13,
-      });
-      afterClickNav(map);
+      const filter = filterFromSlug(placesRef.current, slug);
+      navigateFromFilter(filter, featureBounds(feature.geometry));
+      onOpenPanelRef.current?.(slug);
     },
-    [afterClickNav],
+    [navigateFromFilter],
   );
-
-  const clickNavZoomOut = useCallback(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    const filter = provinceFilterRef.current;
-    pinnedFocusRef.current = false;
-
-    if (filter && isAmazonasProvinceId(filter)) {
-      provinceFilterRef.current = null;
-      departmentFilterRef.current = "AMAZONAS";
-      adminCtxCacheRef.current.districtFilter = null;
-      adminCtxCacheRef.current.boundsKey = null;
-      map.flyTo({
-        center: AMAZONAS_CENTER,
-        zoom: 7.5,
-        duration: 1200,
-        essential: true,
-      });
-    } else if (
-      departmentFilterRef.current === "AMAZONAS" ||
-      map.getZoom() >= ZOOM_BAND.provMin
-    ) {
-      provinceFilterRef.current = null;
-      departmentFilterRef.current = null;
-      adminCtxCacheRef.current.districtFilter = null;
-      adminCtxCacheRef.current.boundsKey = null;
-      map.flyTo({
-        center: PERU_CENTER,
-        zoom: PERU_ZOOM,
-        duration: 1200,
-        essential: true,
-      });
-    } else if (map.getZoom() >= ZOOM_BAND.deptMin) {
-      provinceFilterRef.current = null;
-      departmentFilterRef.current = null;
-      map.flyTo({
-        center: GLOBE_CENTER,
-        zoom: GLOBE_ZOOM,
-        duration: 1400,
-        essential: true,
-      });
-    } else {
-      map.flyTo({
-        center: GLOBE_CENTER,
-        zoom: GLOBE_ZOOM,
-        duration: 1000,
-        essential: true,
-      });
-    }
-
-    afterClickNav(map);
-  }, [afterClickNav]);
 
   const refreshDistrictSource = useCallback(
     async (map) => {
@@ -1033,7 +983,6 @@ export default function GlobeMap({
     map.getSource("peru-districts").setData(data);
     syncLabelSource(map, "peru-districts-label-pts", data);
     registerDistrictGeoJSON(data);
-    setDistrictInfoGeo(data);
     cache.districtFilter = filter;
       cache.boundsKey = boundsKey;
       cache.districtFeatureCount = data.features.length;
@@ -1154,8 +1103,97 @@ export default function GlobeMap({
     [refreshDistrictSource],
   );
 
+  applyFilterToMapRef.current = async (map, filter, boundsOverride = null) => {
+    if (!map?.isStyleLoaded()) return;
+
+    let safeFilter = filter ?? EMPTY_FILTER;
+    if (isChachapoyasScope(scopeRef.current)) {
+      safeFilter = clampFilterToChachapoyas(safeFilter);
+    }
+
+    const navKey = filterKey(safeFilter);
+    const gen = ++navGenerationRef.current;
+    navBusyRef.current = true;
+
+    try {
+      const { pinned, provinceFilterRef: prov, departmentFilterRef: dept } =
+        filterToAdminRefs(safeFilter, placesRef.current);
+
+      pinnedFocusRef.current = pinned;
+      provinceFilterRef.current = prov;
+      departmentFilterRef.current = dept;
+
+      adminCtxCacheRef.current.districtFilter = null;
+      adminCtxCacheRef.current.boundsKey = null;
+      adminCtxCacheRef.current.zoomBand = null;
+
+      const rawBounds =
+        boundsOverride ??
+        (await getBoundsForFilter(placesRef.current, safeFilter));
+      const bounds = normalizeBounds(rawBounds);
+
+      const fitOptions = {
+        padding: 40,
+        duration: 1200,
+        essential: true,
+      };
+
+      if (safeFilter.district) {
+        fitOptions.maxZoom = 13;
+        fitOptions.minZoom = PROVINCE_FOCUS_MIN_ZOOM;
+      } else if (safeFilter.province) {
+        fitOptions.maxZoom = 11;
+        fitOptions.minZoom = PROVINCE_FOCUS_MIN_ZOOM;
+      } else if (safeFilter.region) {
+        fitOptions.maxZoom = 9;
+      } else if (safeFilter.country) {
+        fitOptions.maxZoom = 6.8;
+      }
+
+      if (!safeFilter.country) {
+        map.setMaxBounds(null);
+        map.flyTo({
+          center: GLOBE_CENTER,
+          zoom: GLOBE_ZOOM,
+          duration: 1400,
+          essential: true,
+        });
+        appliedNavKeyRef.current = navKey;
+      } else if (isValidBounds(bounds)) {
+        map.setMaxBounds(expandBoundsForMax(bounds));
+        map.fitBounds(bounds, fitOptions);
+        appliedNavKeyRef.current = navKey;
+      } else {
+        console.warn("[EYL nav] bounds inválidos, se mantiene la vista", safeFilter);
+      }
+
+      if (gen !== navGenerationRef.current) return;
+
+      await ensureDetailedProvinces(map);
+      if (gen !== navGenerationRef.current) return;
+      updateProvinceData(map);
+      await ensureDistrictLayers(map, Boolean(prov));
+      if (gen !== navGenerationRef.current) return;
+      await updateDistrictData(map);
+      if (gen !== navGenerationRef.current) return;
+      await runPhotoPatterns(map);
+      if (gen !== navGenerationRef.current) return;
+      applyProvinceFocusMode(map, prov);
+      syncProjection(map, prov);
+      syncAdminLevelVisibility(map, prov);
+    } catch (err) {
+      console.error("[EYL nav]", err);
+    } finally {
+      if (gen === navGenerationRef.current) {
+        navBusyRef.current = false;
+      }
+    }
+  };
+
   const refreshAdminContext = useCallback(
     async (map) => {
+      if (navBusyRef.current) return;
+
       const prevProvince = provinceFilterRef.current;
       const prevDept = departmentFilterRef.current;
       autoDetectAdminContext(map);
@@ -1189,12 +1227,6 @@ export default function GlobeMap({
     refreshAfterNavRef.current = refreshAdminContext;
   }, [refreshAdminContext]);
 
-  useEffect(() => {
-    if (mapNavRef) {
-      mapNavRef.current = { zoomOut: clickNavZoomOut };
-    }
-  }, [clickNavZoomOut, mapNavRef]);
-
   const syncLayers = useCallback(
     (map) => {
       addWorldCountryLayers(map, handleWorldClick);
@@ -1227,23 +1259,33 @@ export default function GlobeMap({
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
+    const chachapoyas = isChachapoyasScope(scopeRef.current);
+
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: MAP_STYLE,
-      center: GLOBE_CENTER,
-      zoom: GLOBE_ZOOM,
+      center: chachapoyas ? CHACHAPOYAS_CENTER : GLOBE_CENTER,
+      zoom: chachapoyas ? CHACHAPOYAS_ZOOM : GLOBE_ZOOM,
       pitch: 0,
       bearing: 0,
-      projection: "globe",
+      projection: chachapoyas ? "mercator" : "globe",
     });
 
     map.addControl(new maplibregl.NavigationControl(), "top-right");
-    map.addControl(new maplibregl.GlobeControl(), "top-right");
+    if (!chachapoyas) {
+      map.addControl(new maplibregl.GlobeControl(), "top-right");
+    }
 
     map.on("load", async () => {
-      applyGlobeAtmosphere(map);
+      if (chachapoyas) {
+        provinceFilterRef.current = CHACHAPOYAS_PROVINCE_ID;
+        departmentFilterRef.current = "AMAZONAS";
+        pinnedFocusRef.current = true;
+      } else {
+        applyGlobeAtmosphere(map);
+      }
       syncLayers(map);
-      await ensureDistrictLayers(map);
+      await ensureDistrictLayers(map, chachapoyas);
       syncAdminLevelVisibility(map, provinceFilterRef.current);
       syncProjection(map, provinceFilterRef.current);
       await runPhotoPatterns(map);
@@ -1302,30 +1344,6 @@ export default function GlobeMap({
   }, [syncLayers, ensureDistrictLayers, refreshAdminContext]);
 
   useEffect(() => {
-    const grouped = groupEntriesBySlug(entries);
-    const regionsGeoJSON = enrichPeruDepartments(
-      getRawPeruDepartments(),
-      places,
-      grouped,
-    );
-    const provincesGeoJSON = enrichPeruProvinces(
-      getActiveProvincesGeoJSON(),
-      places,
-      grouped,
-      provinceFilterRef.current,
-      departmentFilterRef.current,
-    );
-    setInfoTargets(
-      buildMapInfoTargets(
-        places,
-        regionsGeoJSON,
-        provincesGeoJSON,
-        districtInfoGeo,
-      ),
-    );
-  }, [places, entries, districtInfoGeo]);
-
-  useEffect(() => {
     const map = mapRef.current;
     if (!map?.isStyleLoaded()) return;
     syncLayers(map);
@@ -1334,73 +1352,21 @@ export default function GlobeMap({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !focusPlace) return;
+    if (!mapReady || !map?.isStyleLoaded()) return;
 
-    const fly = async () => {
-      const isPinned = Boolean(focusPlace.province_id);
-      pinnedFocusRef.current = isPinned;
-      provinceFilterRef.current = focusPlace.province_id || null;
-      if (isPinned && isAmazonasProvinceId(focusPlace.province_id)) {
-        departmentFilterRef.current = "AMAZONAS";
-      } else {
-        departmentFilterRef.current = null;
-      }
+    let filter = mapFilter ?? EMPTY_FILTER;
+    if (isChachapoyasScope(scopeRef.current)) {
+      filter = clampFilterToChachapoyas(filter);
+    }
+    const key = filterKey(filter);
+    if (appliedNavKeyRef.current === key) return;
 
-      adminCtxCacheRef.current.districtFilter = null;
-      adminCtxCacheRef.current.boundsKey = null;
-      adminCtxCacheRef.current.zoomBand = null;
-
-      await ensureDetailedProvinces(map);
-      updateProvinceData(map);
-      await ensureDistrictLayers(map, Boolean(focusPlace.province_id));
-      await updateDistrictData(map);
-      await runPhotoPatterns(map);
-
-      applyProvinceFocusMode(map, provinceFilterRef.current);
-      syncProjection(map, provinceFilterRef.current);
-
-      if (focusPlace.province_id) {
-        const box = getProvinceBounds(focusPlace.province_id);
-        if (box) {
-          map.fitBounds(box, {
-            padding: 48,
-            minZoom: PROVINCE_FOCUS_MIN_ZOOM,
-            maxZoom: 11,
-            duration: 1600,
-          });
-          return;
-        }
-      }
-
-      map.flyTo({
-        center: [focusPlace.lng, focusPlace.lat],
-        zoom: focusPlace.zoom ?? PERU_ZOOM,
-        duration: 1600,
-        essential: true,
-      });
-    };
-
-    if (map.isStyleLoaded()) fly();
-    else map.once("load", fly);
-  }, [
-    focusPlace,
-    ensureDistrictLayers,
-    updateDistrictData,
-    updateProvinceData,
-    ensureDetailedProvinces,
-    runPhotoPatterns,
-  ]);
+    applyFilterToMapRef.current?.(map, filter);
+  }, [mapFilter, mapReady]);
 
   return (
     <div className="globe-map-wrap">
       <div ref={containerRef} className="globe-map" aria-label="Mapa" />
-      {mapReady && mapRef.current && (
-        <MapInfoOverlay
-          map={mapRef.current}
-          targets={infoTargets}
-          onOpenPanel={(slug) => onOpenPanelRef.current?.(slug)}
-        />
-      )}
     </div>
   );
 }

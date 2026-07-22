@@ -10,7 +10,6 @@ export default function PlacePanel({
   user,
   onClose,
   onNavigate,
-  onFocus,
   onOpenGallery,
 }) {
   const place =
@@ -40,10 +39,7 @@ export default function PlacePanel({
               <button
                 type="button"
                 className="breadcrumb__link"
-                onClick={() => {
-                  onNavigate(item.slug);
-                  onFocus(item);
-                }}
+                onClick={() => onNavigate(item.slug)}
               >
                 {item.name}
               </button>
@@ -73,7 +69,7 @@ export default function PlacePanel({
             {extraPhotos.length > 0 && (
               <div className="place-panel__collage-hint">
                 +{extraPhotos.length} foto{extraPhotos.length > 1 ? "s" : ""} en
-                collage del mapa
+                el mapa
               </div>
             )}
           </>
@@ -86,11 +82,6 @@ export default function PlacePanel({
             {!visited && entry?.target_date && (
               <p className="place-panel__target">
                 Objetivo: {entry.target_date}
-              </p>
-            )}
-            {!visited && !entry?.target_date && (
-              <p className="place-panel__target">
-                Añade una fecha objetivo al editar
               </p>
             )}
           </div>
@@ -114,27 +105,32 @@ export default function PlacePanel({
           <p className="meta-line place-panel__note">{entry.note}</p>
         )}
 
+        {photoEntries.length > 1 && (
+          <section className="place-panel__photos" aria-label="Fotos del lugar">
+            {photoEntries.map((pe) => (
+              <img
+                key={pe.id ?? pe.photo_path}
+                src={getPhotoPublicUrl(pe.photo_path)}
+                alt=""
+                className="place-panel__thumb"
+                loading="lazy"
+              />
+            ))}
+          </section>
+        )}
+
         {children.length > 0 && (
           <section className="children-list">
             <h3>Explorar dentro</h3>
             <ul>
               {children.map((child) => (
-                <li key={child.slug} className="child-link-row">
+                <li key={child.slug}>
                   <button
                     type="button"
                     className="child-link"
-                    onClick={() => onFocus(child)}
+                    onClick={() => onNavigate(child.slug)}
                   >
                     {child.name}
-                  </button>
-                  <button
-                    type="button"
-                    className="map-info-btn map-info-btn--inline"
-                    onClick={() => onNavigate(child.slug)}
-                    aria-label={`Editar ${child.name}`}
-                    title={`Editar — ${child.name}`}
-                  >
-                    ✎
                   </button>
                 </li>
               ))}
@@ -144,7 +140,8 @@ export default function PlacePanel({
 
         {user ? (
           <p className="place-panel__session">
-            Edita fotos en <strong>Mi galería</strong>
+            Para editar fotos abre{" "}
+            <strong>Mi galería</strong>
             {onOpenGallery && (
               <>
                 {" "}
@@ -154,15 +151,15 @@ export default function PlacePanel({
                   className="breadcrumb__link"
                   onClick={() => onOpenGallery(selectedSlug)}
                 >
-                  Abrir galería de {place.name}
+                  Ir a {place.name}
                 </button>
               </>
             )}
           </p>
         ) : (
           <p className="login-hint">
-            Pulsa <strong>Editar</strong> arriba e inicia sesión para subir
-            fotos desde la galería
+            Vista de solo lectura · Pulsa <strong>Editar</strong> para subir
+            fotos
           </p>
         )}
       </div>
