@@ -28,10 +28,15 @@ import {
   filterFromProvinceFeature,
   filterKey,
   filterToAdminRefs,
+  fitMapToScopedBounds,
   getBoundsForFilter,
+  getDistrictBoundsBySlug,
+  getMapFitPadding,
   GLOBE_VIEW,
   isValidBounds,
   normalizeBounds,
+  SCOPED_MAX_ZOOM,
+  SCOPED_MIN_ZOOM,
 } from "../lib/mapNavigation";
 import {
   CHACHAPOYAS_CENTER,
@@ -44,7 +49,8 @@ import {
 /** Fondo oscuro sin calles ni r├¡os ÔÇö solo nuestras capas encima */
 const MAP_STYLE = {
   version: 8,
-  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  glyphs:
+    "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf",
   sources: {},
   layers: [
     {
@@ -130,7 +136,7 @@ function watermarkOpacity(inStart, inEnd, outStart, outEnd, peak = 0.92) {
 }
 
 const labelLayoutBase = {
-  "text-font": ["Open Sans Regular"],
+  "text-font": ["Noto Sans Regular"],
   "text-allow-overlap": true,
   "text-ignore-placement": true,
   "text-anchor": "center",
@@ -478,10 +484,19 @@ function getDistrictBoundsFilter(map, provinceFilterId) {
   ];
 }
 
-/** Un solo nivel admin visible ÔÇö evita l├¡neas superpuestas al hacer zoom */
-function syncAdminLevelVisibility(map, provinceFilterId) {
+/** Un solo nivel admin visible — evita líneas superpuestas al hacer zoom */
+function syncAdminLevelVisibility(map, provinceFilterId, options = {}) {
+  const { pinned = false, hideWorld = false } = options;
   const focus = Boolean(provinceFilterId);
   const zoom = map.getZoom();
+
+  if (hideWorld) {
+    setLayerVisibility(
+      map,
+      ["world-countries-fill", "world-countries-border"],
+      false,
+    );
+  }
 
   if (focus) {
     setLayerVisibility(
@@ -497,7 +512,7 @@ function syncAdminLevelVisibility(map, provinceFilterId) {
       false,
     );
 
-    const showDistricts = zoom >= PROVINCE_FOCUS_MIN_ZOOM;
+    const showDistricts = pinned || zoom >= PROVINCE_FOCUS_MIN_ZOOM;
     setLayerVisibility(
       map,
       ["peru-districts-fill", "peru-districts-border"],
@@ -539,7 +554,12 @@ function syncAdminLevelVisibility(map, provinceFilterId) {
       );
     }
 
-    map.setMaxZoom(PROVINCE_FOCUS_MAX_ZOOM);
+    if (!pinned) {
+      map.setMaxZoom(PROVINCE_FOCUS_MAX_ZOOM);
+    } else {
+      map.setMaxZoom(SCOPED_MAX_ZOOM);
+      map.setMinZoom(SCOPED_MIN_ZOOM);
+    }
     return;
   }
 
@@ -702,8 +722,8 @@ function addWorldCountryLayers(map, onWorldClick) {
   map.on("click", "world-countries-fill", onWorldClick);
 }
 
-function applyProvinceFocusMode(map, provinceFilterId) {
-  syncAdminLevelVisibility(map, provinceFilterId);
+function applyProvinceFocusMode(map, provinceFilterId, options = {}) {
+  syncAdminLevelVisibility(map, provinceFilterId, options);
 }
 
 function addPeruRegionLayers(map, places, entriesGrouped, onRegionClick) {
@@ -843,11 +863,46 @@ export default function GlobeMap({
   const navGenerationRef = useRef(0);
   const navBusyRef = useRef(false);
   const lastDistrictGeoRef = useRef(null);
+  const scopedBoundsRef = useRef(null);
+  const scopedFilterRef = useRef(mapFilter);
+  const mapFilterRef = useRef(mapFilter);
   placesRef.current = places;
   entriesGroupedRef.current = groupEntriesBySlug(entries);
   onOpenPanelRef.current = onOpenPanel;
   onMapFilterChangeRef.current = onMapFilterChange;
   scopeRef.current = scope;
+  mapFilterRef.current = mapFilter;
+  scopedFilterRef.current = mapFilter;
+
+  const getFocusVisOptions = useCallback(
+    () => ({
+      pinned: pinnedFocusRef.current || isChachapoyasScope(scopeRef.current),
+      hideWorld: isChachapoyasScope(scopeRef.current),
+    }),
+    [],
+  );
+
+  const refitScopedView = useCallback((map) => {
+    if (!map?.isStyleLoaded()) return;
+    if (!isChachapoyasScope(scopeRef.current)) return;
+    const bounds = scopedBoundsRef.current;
+    if (!isValidBounds(bounds)) return;
+    const filter = scopedFilterRef.current;
+    fitMapToScopedBounds(map, bounds, {
+      district: Boolean(filter?.district),
+      duration: 0,
+    });
+  }, []);
+
+  const scopedFitNow = useCallback((map, bounds, isDistrictView) => {
+    if (!map?.isStyleLoaded() || !isValidBounds(bounds)) return;
+    if (!isChachapoyasScope(scopeRef.current)) return;
+    scopedBoundsRef.current = bounds;
+    fitMapToScopedBounds(map, bounds, {
+      district: isDistrictView,
+      duration: 0,
+    });
+  }, []);
 
   const runPhotoPatterns = useCallback(async (map, districtGeoJSON = null) => {
     await applyPhotoPatterns(
@@ -963,10 +1018,11 @@ export default function GlobeMap({
 
       const boundsKey = boundsFilter
         ? `${boundsFilter[0][0].toFixed(3)},${boundsFilter[0][1].toFixed(3)},${boundsFilter[1][0].toFixed(3)},${boundsFilter[1][1].toFixed(3)}`
-        : filter;
+        : `${filter}|${scopedFilterRef.current?.district ?? ""}`;
       const cache = adminCtxCacheRef.current;
       if (
         cache.districtFilter === filter &&
+        cache.districtSlug === (scopedFilterRef.current?.district ?? "") &&
         cache.boundsKey === boundsKey &&
         cache.districtFeatureCount != null
       ) {
@@ -979,17 +1035,22 @@ export default function GlobeMap({
         entriesGroupedRef.current,
         filter,
         boundsFilter,
+        scopedFilterRef.current?.district ?? null,
       );
     map.getSource("peru-districts").setData(data);
     syncLabelSource(map, "peru-districts-label-pts", data);
-    registerDistrictGeoJSON(data);
     cache.districtFilter = filter;
+      cache.districtSlug = scopedFilterRef.current?.district ?? "";
       cache.boundsKey = boundsKey;
       cache.districtFeatureCount = data.features.length;
       lastDistrictGeoRef.current = data;
       await runPhotoPatterns(map, data);
+
+      if (isChachapoyasScope(scopeRef.current)) {
+        refitScopedView(map);
+      }
     },
-    [runPhotoPatterns],
+    [runPhotoPatterns, refitScopedView],
   );
 
   const ensureDetailedProvinces = useCallback(async (map) => {
@@ -1054,17 +1115,30 @@ export default function GlobeMap({
   const ensureDistrictLayers = useCallback(
     async (map, force = false) => {
       const filter = provinceFilterRef.current;
+      const scopedPinned =
+        isChachapoyasScope(scopeRef.current) && pinnedFocusRef.current;
 
       if (districtsReadyRef.current) {
         if (!map.getSource("peru-districts")) return;
         const zoom = map.getZoom();
-        if (!isAmazonasProvinceId(filter) && zoom < DISTRICT_MIN_ZOOM) return;
+        if (!scopedPinned && !isAmazonasProvinceId(filter) && zoom < DISTRICT_MIN_ZOOM) {
+          return;
+        }
         await refreshDistrictSource(map);
         return;
       }
-      if (!force && map.getZoom() < DISTRICT_MIN_ZOOM - 0.5) return;
+      if (!force && !scopedPinned && map.getZoom() < DISTRICT_MIN_ZOOM - 0.5) {
+        return;
+      }
       try {
         const raw = await loadDistrictGeoJSON(filter);
+        const catalogGeo = enrichPeruDistricts(
+          raw,
+          placesRef.current,
+          entriesGroupedRef.current,
+          filter,
+        );
+        registerDistrictGeoJSON(catalogGeo);
         addPeruDistrictLayers(
           map,
           placesRef.current,
@@ -1093,8 +1167,12 @@ export default function GlobeMap({
     );
     map.getSource("peru-provinces").setData(provincesGeoJSON);
     syncLabelSource(map, "peru-provinces-label-pts", provincesGeoJSON);
-    applyProvinceFocusMode(map, provinceFilterRef.current);
-  }, []);
+    applyProvinceFocusMode(
+      map,
+      provinceFilterRef.current,
+      getFocusVisOptions(),
+    );
+  }, [getFocusVisOptions]);
 
   const updateDistrictData = useCallback(
     async (map) => {
@@ -1116,6 +1194,8 @@ export default function GlobeMap({
     navBusyRef.current = true;
 
     try {
+      scopedFilterRef.current = safeFilter;
+
       const { pinned, provinceFilterRef: prov, departmentFilterRef: dept } =
         filterToAdminRefs(safeFilter, placesRef.current);
 
@@ -1124,6 +1204,7 @@ export default function GlobeMap({
       departmentFilterRef.current = dept;
 
       adminCtxCacheRef.current.districtFilter = null;
+      adminCtxCacheRef.current.districtSlug = null;
       adminCtxCacheRef.current.boundsKey = null;
       adminCtxCacheRef.current.zoomBand = null;
 
@@ -1131,27 +1212,16 @@ export default function GlobeMap({
         boundsOverride ??
         (await getBoundsForFilter(placesRef.current, safeFilter));
       const bounds = normalizeBounds(rawBounds);
+      const isScoped = isChachapoyasScope(scopeRef.current);
+      const isDistrictView = Boolean(safeFilter.district);
 
-      const fitOptions = {
-        padding: 40,
-        duration: 1200,
-        essential: true,
-      };
-
-      if (safeFilter.district) {
-        fitOptions.maxZoom = 13;
-        fitOptions.minZoom = PROVINCE_FOCUS_MIN_ZOOM;
-      } else if (safeFilter.province) {
-        fitOptions.maxZoom = 11;
-        fitOptions.minZoom = PROVINCE_FOCUS_MIN_ZOOM;
-      } else if (safeFilter.region) {
-        fitOptions.maxZoom = 9;
-      } else if (safeFilter.country) {
-        fitOptions.maxZoom = 6.8;
-      }
+      const visOpts = getFocusVisOptions();
 
       if (!safeFilter.country) {
+        scopedBoundsRef.current = null;
         map.setMaxBounds(null);
+        map.setMinZoom(0);
+        map.setMaxZoom(18);
         map.flyTo({
           center: GLOBE_CENTER,
           zoom: GLOBE_ZOOM,
@@ -1160,9 +1230,11 @@ export default function GlobeMap({
         });
         appliedNavKeyRef.current = navKey;
       } else if (isValidBounds(bounds)) {
-        map.setMaxBounds(expandBoundsForMax(bounds));
-        map.fitBounds(bounds, fitOptions);
+        scopedBoundsRef.current = bounds;
         appliedNavKeyRef.current = navKey;
+        if (isScoped) {
+          scopedFitNow(map, bounds, isDistrictView);
+        }
       } else {
         console.warn("[EYL nav] bounds inválidos, se mantiene la vista", safeFilter);
       }
@@ -1178,9 +1250,25 @@ export default function GlobeMap({
       if (gen !== navGenerationRef.current) return;
       await runPhotoPatterns(map);
       if (gen !== navGenerationRef.current) return;
-      applyProvinceFocusMode(map, prov);
+      applyProvinceFocusMode(map, prov, visOpts);
       syncProjection(map, prov);
-      syncAdminLevelVisibility(map, prov);
+      syncAdminLevelVisibility(map, prov, visOpts);
+
+      if (isScoped && isValidBounds(scopedBoundsRef.current)) {
+        fitMapToScopedBounds(map, scopedBoundsRef.current, {
+          district: isDistrictView,
+          duration: 0,
+        });
+      } else if (isValidBounds(scopedBoundsRef.current)) {
+        const padding = getMapFitPadding(map);
+        map.fitBounds(scopedBoundsRef.current, {
+          padding,
+          duration: 0,
+          essential: true,
+          maxZoom: isDistrictView ? 14 : 12,
+        });
+        map.setMaxBounds(expandBoundsForMax(scopedBoundsRef.current));
+      }
     } catch (err) {
       console.error("[EYL nav]", err);
     } finally {
@@ -1208,7 +1296,11 @@ export default function GlobeMap({
         adminCtxCacheRef.current.districtFilter = null;
         adminCtxCacheRef.current.boundsKey = null;
       } else {
-        syncAdminLevelVisibility(map, provinceFilterRef.current);
+        syncAdminLevelVisibility(
+          map,
+          provinceFilterRef.current,
+          getFocusVisOptions(),
+        );
       }
 
       await ensureDistrictLayers(map, Boolean(provinceFilterRef.current));
@@ -1246,13 +1338,18 @@ export default function GlobeMap({
       );
       addPlaceLayers(map);
       ensureDistrictLayers(map, Boolean(provinceFilterRef.current));
-      applyProvinceFocusMode(map, provinceFilterRef.current);
+      applyProvinceFocusMode(
+        map,
+        provinceFilterRef.current,
+        getFocusVisOptions(),
+      );
     },
     [
       handleWorldClick,
       handleRegionClick,
       handleProvinceClick,
       ensureDistrictLayers,
+      getFocusVisOptions,
     ],
   );
 
@@ -1269,6 +1366,11 @@ export default function GlobeMap({
       pitch: 0,
       bearing: 0,
       projection: chachapoyas ? "mercator" : "globe",
+      touchPitch: false,
+      touchZoomRotate: true,
+      doubleClickZoom: true,
+      scrollZoom: true,
+      boxZoom: true,
     });
 
     map.addControl(new maplibregl.NavigationControl(), "top-right");
@@ -1286,7 +1388,11 @@ export default function GlobeMap({
       }
       syncLayers(map);
       await ensureDistrictLayers(map, chachapoyas);
-      syncAdminLevelVisibility(map, provinceFilterRef.current);
+      syncAdminLevelVisibility(
+        map,
+        provinceFilterRef.current,
+        getFocusVisOptions(),
+      );
       syncProjection(map, provinceFilterRef.current);
       await runPhotoPatterns(map);
       setMapReady(true);
@@ -1305,9 +1411,10 @@ export default function GlobeMap({
     map.on("zoom", () => {
       syncProjection(map, provinceFilterRef.current);
       const zoom = map.getZoom();
+      const visOpts = getFocusVisOptions();
       const focus = Boolean(provinceFilterRef.current);
       const band = focus
-        ? zoom >= PROVINCE_FOCUS_MIN_ZOOM
+        ? visOpts.pinned || zoom >= PROVINCE_FOCUS_MIN_ZOOM
           ? "focus-dist"
           : "focus-wait"
         : zoom < ZOOM_BAND.deptMax
@@ -1317,7 +1424,11 @@ export default function GlobeMap({
             : "dist";
       if (adminCtxCacheRef.current.zoomBand !== band) {
         adminCtxCacheRef.current.zoomBand = band;
-        syncAdminLevelVisibility(map, provinceFilterRef.current);
+        syncAdminLevelVisibility(
+          map,
+          provinceFilterRef.current,
+          visOpts,
+        );
       }
     });
 
@@ -1330,18 +1441,50 @@ export default function GlobeMap({
 
     map.on("zoomend", () => {
       syncProjection(map, provinceFilterRef.current);
-      syncAdminLevelVisibility(map, provinceFilterRef.current);
+      syncAdminLevelVisibility(
+        map,
+        provinceFilterRef.current,
+        getFocusVisOptions(),
+      );
       scheduleAdminRefresh(map);
     });
 
     mapRef.current = map;
 
+    let resizeObserver = null;
+    let resizeTimer = null;
+
+    const handleViewportChange = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        map.resize();
+        refitScopedView(map);
+      }, 120);
+    };
+
+    if (containerRef.current && typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(handleViewportChange);
+      resizeObserver.observe(containerRef.current);
+    }
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("orientationchange", handleViewportChange);
+
     return () => {
+      clearTimeout(resizeTimer);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("orientationchange", handleViewportChange);
       setMapReady(false);
       map.remove();
       mapRef.current = null;
     };
-  }, [syncLayers, ensureDistrictLayers, refreshAdminContext]);
+  }, [
+    syncLayers,
+    ensureDistrictLayers,
+    refreshAdminContext,
+    getFocusVisOptions,
+    refitScopedView,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1363,6 +1506,13 @@ export default function GlobeMap({
 
     applyFilterToMapRef.current?.(map, filter);
   }, [mapFilter, mapReady]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapReady || !map?.isStyleLoaded()) return;
+    if (!isChachapoyasScope(scopeRef.current)) return;
+    requestAnimationFrame(() => refitScopedView(map));
+  }, [mapReady, refitScopedView]);
 
   return (
     <div className="globe-map-wrap">

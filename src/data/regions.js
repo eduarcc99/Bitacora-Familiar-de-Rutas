@@ -41,6 +41,15 @@ export function filterByDepartmentName(features, departmentName) {
   });
 }
 
+export function filterByDistrictSlug(features, districtSlug) {
+  if (!districtSlug) return features;
+  return features.filter((feature) => {
+    const slug =
+      feature.properties.slug || getDistrictSlug(feature.properties);
+    return slug === districtSlug;
+  });
+}
+
 export const CHACHAPOYAS_PROVINCE_ID = "0101";
 
 /** Las 7 provincias de Amazonas (distritos detallados disponibles) */
@@ -304,11 +313,88 @@ function ringCentroid(ring) {
   return [cx / (6 * area), cy / (6 * area)];
 }
 
-function geometryCentroid(geometry) {
-  if (!geometry) return null;
-  if (geometry.type === "Polygon") {
-    return ringCentroid(geometry.coordinates[0]);
+function ringBBox(ring) {
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+
+  for (const [lng, lat] of ring) {
+    minLng = Math.min(minLng, lng);
+    maxLng = Math.max(maxLng, lng);
+    minLat = Math.min(minLat, lat);
+    maxLat = Math.max(maxLat, lat);
   }
+
+  return { minLng, maxLng, minLat, maxLat };
+}
+
+function distanceToRingEdge(point, ring) {
+  const [px, py] = point;
+  let minDist = Infinity;
+  const n = ring.length - 1;
+
+  for (let i = 0; i < n; i++) {
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[i + 1];
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy || 1e-12;
+    const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
+    const qx = x1 + t * dx;
+    const qy = y1 + t * dy;
+    minDist = Math.min(minDist, Math.hypot(px - qx, py - qy));
+  }
+
+  return minDist;
+}
+
+/** Punto interior del polígono (el centroide puede caer fuera en formas cóncavas) */
+function labelPointForRing(ring) {
+  if (!ring?.length) return null;
+
+  const centroid = ringCentroid(ring);
+  if (centroid && pointInRing(centroid, ring)) return centroid;
+
+  const { minLng, maxLng, minLat, maxLat } = ringBBox(ring);
+  const mid = [(minLng + maxLng) / 2, (minLat + maxLat) / 2];
+  if (pointInRing(mid, ring)) return mid;
+
+  if (centroid) {
+    for (let t = 0.05; t <= 1; t += 0.05) {
+      const candidate = [
+        centroid[0] + t * (mid[0] - centroid[0]),
+        centroid[1] + t * (mid[1] - centroid[1]),
+      ];
+      if (pointInRing(candidate, ring)) return candidate;
+    }
+  }
+
+  const steps = 12;
+  let best = null;
+  let bestScore = -1;
+
+  for (let i = 0; i <= steps; i++) {
+    for (let j = 0; j <= steps; j++) {
+      const candidate = [
+        minLng + ((maxLng - minLng) * i) / steps,
+        minLat + ((maxLat - minLat) * j) / steps,
+      ];
+      if (!pointInRing(candidate, ring)) continue;
+      const score = distanceToRingEdge(candidate, ring);
+      if (score > bestScore) {
+        bestScore = score;
+        best = candidate;
+      }
+    }
+  }
+
+  return best ?? centroid;
+}
+
+function outerRing(geometry) {
+  if (!geometry) return null;
+  if (geometry.type === "Polygon") return geometry.coordinates[0];
   if (geometry.type === "MultiPolygon") {
     let largest = geometry.coordinates[0][0];
     let maxLen = largest.length;
@@ -318,9 +404,14 @@ function geometryCentroid(geometry) {
         largest = poly[0];
       }
     }
-    return ringCentroid(largest);
+    return largest;
   }
   return null;
+}
+
+function geometryLabelPoint(geometry) {
+  const ring = outerRing(geometry);
+  return ring ? labelPointForRing(ring) : null;
 }
 
 /** Puntos en el centro de cada polígono — etiquetas fiables en MapLibre */
@@ -328,7 +419,7 @@ export function geoJSONToLabelPoints(geojson) {
   const features = [];
 
   for (const feature of geojson.features) {
-    const coordinates = geometryCentroid(feature.geometry);
+    const coordinates = geometryLabelPoint(feature.geometry);
     if (!coordinates) continue;
     features.push({
       type: "Feature",
@@ -591,6 +682,9 @@ export async function loadChachapoyasDistricts() {
 }
 
 export async function loadDistrictGeoJSON(provinceFilterId = null) {
+  if (provinceFilterId === CHACHAPOYAS_PROVINCE_ID) {
+    return loadChachapoyasDistricts();
+  }
   if (isAmazonasProvinceId(provinceFilterId)) {
     return loadAmazonasDistricts();
   }
@@ -611,10 +705,15 @@ export function enrichPeruDistricts(
   entriesGrouped,
   provinceFilterId = null,
   boundsFilter = null,
+  districtSlugFilter = null,
 ) {
   let baseFeatures = provinceFilterId
     ? filterByProvinceId(rawGeoJSON.features, provinceFilterId)
     : rawGeoJSON.features;
+
+  if (districtSlugFilter) {
+    baseFeatures = filterByDistrictSlug(baseFeatures, districtSlugFilter);
+  }
 
   if (!provinceFilterId && boundsFilter) {
     baseFeatures = filterFeaturesByBounds(baseFeatures, boundsFilter);

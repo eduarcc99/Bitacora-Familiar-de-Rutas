@@ -72,7 +72,8 @@ export default function ChachapoyasFilterBar({ places, filter, onChange }) {
       </div>
 
       <p className="map-filter-bar__hint">
-        Fase 1 · Provincia de Chachapoyas · Clic en un distrito del mapa
+        Ajuste automático a pantalla · Pellizca o usa +/− · Cambia el filtro para
+        otro distrito
       </p>
     </footer>
   )
