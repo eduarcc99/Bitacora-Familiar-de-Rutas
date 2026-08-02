@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { EMPTY_FILTER,
-  getActiveFilterSlug,
   getFilteredPhotoEntries,
   getFilterSummary,
   initDistrictCatalog,
@@ -31,8 +30,8 @@ function EmptyState({ hasFilter, onClear }) {
       <h3 className="text-base font-semibold text-zinc-200">Sin fotos</h3>
       <p className="mt-2 max-w-sm text-sm leading-relaxed text-zinc-500">
         {hasFilter
-          ? 'No hay recuerdos con este filtro. Sube la primera foto o prueba otra ubicación.'
-          : 'Selecciona Perú en el panel lateral para empezar a subir fotos a tus lugares.'}
+          ? 'No hay recuerdos con este filtro. Elige un distrito y sube la primera foto, o prueba otra ubicación.'
+          : 'Selecciona Perú › región › provincia › distrito para subir fotos a un lugar concreto.'}
       </p>
       {hasFilter && (
         <button
@@ -73,18 +72,27 @@ export default function GalleryEditor({
       )
   }, [])
 
+  // Solo reseedar al abrir desde un lugar concreto — no al refrescar places/entries tras subir
   useEffect(() => {
+    if (!initialSlug) return
     setFilter(resolveInitialFilter(places, initialSlug))
     setLightboxIndex(null)
-  }, [initialSlug, places])
+    // places intencional fuera de deps: evitar saltar filtros en cada onSaved/reloadData
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSlug])
 
   const filteredPhotos = useMemo(
     () => getFilteredPhotoEntries(places, entries, filter),
     [places, entries, filter],
   )
 
-  const uploadSlug = getActiveFilterSlug(filter)
+  // Una foto vive en un solo polígono: solo se sube a distrito elegido
+  const uploadSlug = filter.district
   const uploadPlace = uploadSlug ? resolveCatalogPlace(places, uploadSlug) : null
+  const canUpload = Boolean(
+    uploadPlace &&
+      (uploadPlace.level === 'district' || String(uploadSlug).startsWith('dist-')),
+  )
   const summary = getFilterSummary(places, filter)
   const showPlaceLabel = !filter.district && filteredPhotos.length > 0
   const hasAnyFilter = Boolean(
@@ -92,8 +100,8 @@ export default function GalleryEditor({
   )
 
   async function handleUpload(fileList) {
-    if (!uploadPlace || !user) {
-      setError('Selecciona al menos Perú para subir fotos.')
+    if (!canUpload || !user) {
+      setError('Elige un distrito concreto para subir fotos. La foto solo se guarda en ese lugar.')
       return
     }
 
@@ -165,7 +173,7 @@ export default function GalleryEditor({
         userEmail={user?.email}
         photoCount={filteredPhotos.length}
         uploadLoading={loading}
-        canUpload={Boolean(uploadPlace)}
+        canUpload={canUpload}
         onUploadClick={() => setUploadOpen(true)}
         onViewMap={onViewMap}
         onSignOut={onSignOut}
@@ -177,7 +185,7 @@ export default function GalleryEditor({
           filter={filter}
           onChange={handleFilterChange}
           catalogReady={catalogReady}
-          uploadPlace={uploadPlace}
+          uploadPlace={canUpload ? uploadPlace : null}
           uploadLoading={loading}
           onUploadClick={() => setUploadOpen(true)}
         />
@@ -248,7 +256,7 @@ export default function GalleryEditor({
       </div>
 
       <UploadModal
-        open={uploadOpen && Boolean(uploadPlace)}
+        open={uploadOpen && canUpload}
         onClose={() => setUploadOpen(false)}
         placeName={uploadPlace?.name ?? ''}
         loading={loading}

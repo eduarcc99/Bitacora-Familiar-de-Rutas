@@ -1,0 +1,405 @@
+/* EYL 2.0 — visitante (mobile-first, Note 14 Pro ~412×915) */
+
+.visitor-app {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #020408;
+  touch-action: none;
+}
+
+.visitor-app__stage {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.visitor-app__map-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+}
+
+.visitor-app__map-layer .globe-map-wrap,
+.visitor-app__map-layer .globe-map {
+  width: 100%;
+  height: 100%;
+}
+
+/* MapLibre: fondo transparente para ver estrellas detrás */
+.visitor-app__map-layer .maplibregl-canvas {
+  background: transparent !important;
+}
+
+.visitor-app__map-layer .maplibregl-map {
+  background: transparent;
+}
+
+/* Ocultar controles +/- en visitante */
+.visitor-app--clean-map .maplibregl-ctrl-top-right {
+  display: none;
+}
+
+/* Estrellas — visibles detrás del globo (espacio transparente en visitante) */
+.visitor-starfield {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background: radial-gradient(ellipse 130% 90% at 50% 42%, #101a32 0%, #070b16 42%, #02040a 100%);
+}
+
+.visitor-starfield__nebula {
+  position: absolute;
+  inset: -20%;
+  background:
+    radial-gradient(circle at 18% 28%, rgba(110, 150, 255, 0.16) 0%, transparent 42%),
+    radial-gradient(circle at 78% 62%, rgba(170, 110, 220, 0.12) 0%, transparent 38%),
+    radial-gradient(circle at 48% 88%, rgba(70, 130, 200, 0.1) 0%, transparent 48%);
+  pointer-events: none;
+  animation: visitor-nebula-drift 28s ease-in-out infinite alternate;
+}
+
+.visitor-starfield__star {
+  position: absolute;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 0 3px rgba(255, 255, 255, 0.85),
+    0 0 8px rgba(200, 220, 255, 0.45);
+  animation: visitor-twinkle ease-in-out infinite;
+  will-change: opacity, transform;
+}
+
+.visitor-starfield__star--mid {
+  background: #f2f6ff;
+  box-shadow:
+    0 0 4px rgba(255, 255, 255, 0.95),
+    0 0 12px rgba(180, 210, 255, 0.55);
+}
+
+.visitor-starfield__star--bright {
+  background: #fff;
+  box-shadow:
+    0 0 5px rgba(255, 255, 255, 1),
+    0 0 14px rgba(210, 230, 255, 0.85),
+    0 0 28px rgba(140, 180, 255, 0.4);
+  animation-name: visitor-twinkle-bright;
+}
+
+@keyframes visitor-twinkle {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.35);
+  }
+}
+
+@keyframes visitor-twinkle-bright {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1.55);
+  }
+  55% {
+    opacity: 0.7;
+    transform: scale(1.1);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.4);
+  }
+}
+
+@keyframes visitor-nebula-drift {
+  from {
+    transform: translate3d(-1.5%, -1%, 0) scale(1);
+    opacity: 0.85;
+  }
+  to {
+    transform: translate3d(1.5%, 1.2%, 0) scale(1.04);
+    opacity: 1;
+  }
+}
+
+/* Collage desvanecido (4 fotos) */
+.visitor-collage {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.visitor-collage__photo {
+  position: absolute;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 12px;
+  opacity: 0.1;
+  filter: saturate(0.8) blur(0.4px);
+  mix-blend-mode: screen;
+  mask-image: radial-gradient(ellipse 85% 85% at center, #000 28%, transparent 72%);
+}
+
+/* Navegación atrás / adelante */
+.visitor-nav {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top, 12px));
+  left: max(12px, env(safe-area-inset-left, 12px));
+  z-index: 12;
+  display: flex;
+  gap: 8px;
+}
+
+.visitor-nav__btn {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  background: rgba(8, 12, 22, 0.72);
+  color: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.visitor-nav__btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+.visitor-nav__btn:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.visitor-nav__btn:not(:disabled):active {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.visitor-nav__btn:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.45);
+  outline-offset: 2px;
+}
+
+.visitor-nav__btn--home:not(:disabled) {
+  color: rgba(200, 220, 255, 0.95);
+}
+
+/* Acceso gestión de fotos: icono casi invisible (familia) */
+.visitor-app__edit-gate {
+  position: absolute;
+  bottom: max(10px, env(safe-area-inset-bottom, 10px));
+  left: max(10px, env(safe-area-inset-left, 10px));
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  opacity: 0.28;
+  transition: opacity 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+.visitor-app__edit-gate svg {
+  width: 16px;
+  height: 16px;
+}
+
+.visitor-app__edit-gate:hover,
+.visitor-app__edit-gate:focus-visible {
+  opacity: 0.7;
+  color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.06);
+  outline: none;
+}
+
+.visitor-app__edit-gate:focus-visible {
+  outline: 1px solid rgba(255, 255, 255, 0.25);
+  outline-offset: 2px;
+}
+
+.visitor-loading {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #020408;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 0.75rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.visitor-loading__pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+  animation: visitor-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes visitor-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Carrusel visitante (2.º toque) */
+.visitor-carousel {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.visitor-carousel__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(2, 4, 8, 0.55);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.visitor-carousel__sheet {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 520px);
+  max-height: 78vh;
+  margin-bottom: max(12px, env(safe-area-inset-bottom, 12px));
+  border-radius: 20px 20px 16px 16px;
+  background: rgba(10, 14, 24, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+.visitor-carousel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.visitor-carousel__eyebrow {
+  margin: 0;
+  font-size: 0.65rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 220, 160, 0.75);
+}
+
+.visitor-carousel__title {
+  margin: 4px 0 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.visitor-carousel__count {
+  margin: 4px 0 0;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.visitor-carousel__close {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+}
+
+.visitor-carousel__stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  padding: 12px 48px;
+}
+
+.visitor-carousel__photo {
+  max-width: 100%;
+  max-height: 52vh;
+  border-radius: 12px;
+  object-fit: contain;
+}
+
+.visitor-carousel__nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.visitor-carousel__nav:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.visitor-carousel__nav--prev {
+  left: 8px;
+}
+
+.visitor-carousel__nav--next {
+  right: 8px;
+}
+
+.visitor-carousel__note {
+  margin: 0;
+  padding: 12px 18px 18px;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.72);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.visitor-carousel__empty {
+  margin: 0;
+  padding: 28px 16px;
+  text-align: center;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.5);
+}

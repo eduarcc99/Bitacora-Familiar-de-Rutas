@@ -2,6 +2,11 @@ import rawPeruDepartments from "./peru-departments.json";
 import rawPeruProvinces from "./peru-provinces.json";
 import { getPlaceBySlug } from "./places";
 import { getPhotoPublicUrl } from "../lib/supabase";
+import {
+  collectPhotoSlugsForCountry,
+  collectPhotoSlugsForDepartment,
+  collectPhotoSlugsForProvince,
+} from "../lib/photoHierarchy";
 import { getDistrictSlug } from "./districtPlaces";
 
 import { departmentToSlug as deptToSlug, DEPARTMENT_TO_SLUG } from './departmentPlaces'
@@ -513,7 +518,7 @@ function slugsForDistrict(feature, places) {
   );
 
   for (const place of places) {
-    if (place.level !== "poi" && place.level !== "region") continue;
+    if (place.level !== "poi") continue;
 
     if (place.province_id === provId) {
       const placeNorm = normalizeAdminName(place.name.split("(")[0]);
@@ -536,13 +541,21 @@ function slugsForDistrict(feature, places) {
   return [...slugs];
 }
 
-/** Fotos solo en el polígono que corresponde — sin propagar al padre */
+/** Fotos jerárquicas: visibles en cada nivel, recortadas al polígono activo */
 export function featurePhotoState(feature, places, entriesGrouped, level) {
   let slugs = [];
   if (level === "department") {
-    slugs = slugsForDepartment(feature.properties.NOMBDEP, places);
+    slugs = collectPhotoSlugsForDepartment(
+      feature.properties.NOMBDEP,
+      places,
+      entriesGrouped,
+    );
   } else if (level === "province") {
-    slugs = slugsForProvince(feature, places);
+    const provId =
+      feature.properties.province_id ||
+      feature.properties.FIRST_IDPR ||
+      feature.properties.IDPROV;
+    slugs = collectPhotoSlugsForProvince(provId, places, entriesGrouped);
   } else if (level === "district") {
     slugs = slugsForDistrict(feature, places);
   }
@@ -553,12 +566,27 @@ export function featurePhotoState(feature, places, entriesGrouped, level) {
   }
 
   const uniqueUrls = [...new Set(photoUrls)];
+  const hasPhoto = uniqueUrls.length > 0;
+
   return {
     place_slugs: slugs.join(","),
+    photo_urls: hasPhoto ? JSON.stringify(uniqueUrls) : "",
+    has_photo: hasPhoto,
+    visited: hasPhoto,
+    status: hasPhoto ? "visited" : "pending",
+  };
+}
+
+export function buildCountryShellPhotoState(places, entriesGrouped) {
+  const slugs = collectPhotoSlugsForCountry(places, entriesGrouped);
+  const photoUrls = [];
+  for (const slug of slugs) {
+    photoUrls.push(...photoUrlsFromEntries(entriesGrouped[slug]));
+  }
+  const uniqueUrls = [...new Set(photoUrls)];
+  return {
     photo_urls: uniqueUrls.length ? JSON.stringify(uniqueUrls) : "",
     has_photo: uniqueUrls.length > 0,
-    visited: uniqueUrls.length > 0,
-    status: uniqueUrls.length > 0 ? "visited" : "pending",
   };
 }
 

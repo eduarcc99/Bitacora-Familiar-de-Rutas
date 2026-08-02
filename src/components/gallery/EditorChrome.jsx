@@ -17,10 +17,10 @@ export default function EditorChrome({
         </div>
         <div className="min-w-0">
           <h1 className="truncate text-sm font-semibold tracking-tight text-zinc-50">
-            Studio
+            Gestión de fotos
           </h1>
           <p className="hidden text-[11px] text-zinc-500 sm:block">
-            Editor de recuerdos
+            Catálogo familiar · por distrito
           </p>
         </div>
       </div>
@@ -52,7 +52,7 @@ export default function EditorChrome({
           </span>
         )}
         <Button variant="outline" size="sm" onClick={onViewMap}>
-          Mapa
+          Ver mapa
         </Button>
         <Button variant="ghost" size="sm" onClick={onSignOut}>
           Salir

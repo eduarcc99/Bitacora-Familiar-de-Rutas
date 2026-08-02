@@ -14,9 +14,11 @@ import {
   isAmazonasProvinceId,
   loadDetailedProvinces,
   loadDistrictGeoJSON,
+  buildCountryShellPhotoState,
 } from "../data/regions";
 import worldCountries from "../data/world-countries.json";
 import { syncGeoJSONPhotoPatterns } from "../lib/mapPhotoPatterns";
+import { visitorPhotoLevel } from "../lib/photoHierarchy";
 import {
   getDistrictSlug,
   registerDistrictGeoJSON,
@@ -44,25 +46,44 @@ import {
   CHACHAPOYAS_ZOOM,
   clampFilterToChachapoyas,
   isChachapoyasScope,
+  isVisitorV2Scope,
 } from "../lib/mapScope";
+import { getPeruCountryFeatureCollection } from "../lib/peruCountryShell";
 
-/** Fondo oscuro sin calles ni r├¡os ÔÇö solo nuestras capas encima */
-const MAP_STYLE = {
-  version: 8,
-  glyphs:
-    "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf",
-  sources: {},
-  layers: [
-    {
-      id: "background",
-      type: "background",
-      paint: { "background-color": "#060810" },
-    },
-  ],
-};
+function buildMapStyle(transparentBackground = false) {
+  return {
+    version: 8,
+    glyphs:
+      "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf",
+    sources: {},
+    layers: [
+      {
+        id: "background",
+        type: "background",
+        paint: {
+          "background-color": transparentBackground
+            ? "rgba(0,0,0,0)"
+            : "#060810",
+        },
+      },
+    ],
+  };
+}
 
 const GLOBE_ZOOM = GLOBE_VIEW.zoom;
 const GLOBE_CENTER = GLOBE_VIEW.center;
+
+const PERU_COUNTRY_FILTER = {
+  ...EMPTY_FILTER,
+  country: "peru",
+};
+
+function isPeruWorldFeature(feature) {
+  if (!feature?.properties) return false;
+  const admin = feature.properties.ADMIN || feature.properties.NAME;
+  const iso = feature.properties.ISO_A3 || feature.properties.ADM0_A3;
+  return admin === "Peru" || iso === "PER";
+}
 
 const DISTRICT_MIN_ZOOM = 10;
 /** Chachapoyas: distritos visibles antes (solo esa provincia) */
@@ -115,6 +136,13 @@ const districtBorderPaint = {
 const provinceBorderPaint = {
   "line-color": "#ffffff",
   "line-width": ["interpolate", ["linear"], ["zoom"], 7, 1.8, 9, 2.2, 10, 2.6],
+  "line-opacity": 1,
+};
+
+/** Líneas finas blancas — vista país visitante (igual que provincias en Amazonas) */
+const visitorThinWhiteBorderPaint = {
+  "line-color": "#ffffff",
+  "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.2, 6, 1.5, 8, 1.8],
   "line-opacity": 1,
 };
 
@@ -437,14 +465,16 @@ function setLayerVisibility(map, layerIds, visible) {
   });
 }
 
-function applyGlobeAtmosphere(map) {
+function applyGlobeAtmosphere(map, options = {}) {
   if (typeof map.setFog !== "function") return;
+  // Visitante 2.0: espacio transparente para ver el starfield CSS detrás
+  const revealBackdropStars = Boolean(options.revealBackdropStars);
   map.setFog({
-    color: "#060810",
-    "high-color": "#141a30",
-    "horizon-blend": 0.07,
-    "space-color": "#000005",
-    "star-intensity": 0.72,
+    color: revealBackdropStars ? "rgba(8, 12, 28, 0.2)" : "#060810",
+    "high-color": revealBackdropStars ? "rgba(50, 70, 130, 0.45)" : "#141a30",
+    "horizon-blend": revealBackdropStars ? 0.045 : 0.07,
+    "space-color": revealBackdropStars ? "rgba(0, 0, 0, 0)" : "#000005",
+    "star-intensity": revealBackdropStars ? 0.2 : 0.72,
   });
 }
 
@@ -454,10 +484,14 @@ function clearGlobeAtmosphere(map) {
 }
 
 /** Globo alejado ┬À plano Mercator al acercar (fronteras legibles) */
-function syncProjection(map, provinceFilterId) {
+function syncProjection(map, provinceFilterId, options = {}) {
   if (!map?.isStyleLoaded()) return;
 
-  const useGlobe = map.getZoom() <= GLOBE_MAX_ZOOM && !provinceFilterId;
+  const { visitorCountryFocus = false } = options;
+  const useGlobe =
+    map.getZoom() <= GLOBE_MAX_ZOOM &&
+    !provinceFilterId &&
+    !visitorCountryFocus;
 
   const current = map.getProjection()?.type;
   const next = useGlobe ? "globe" : "mercator";
@@ -465,7 +499,9 @@ function syncProjection(map, provinceFilterId) {
 
   map.setProjection({ type: next });
   if (useGlobe) {
-    applyGlobeAtmosphere(map);
+    applyGlobeAtmosphere(map, {
+      revealBackdropStars: Boolean(options.revealBackdropStars),
+    });
     map.setPitch(0);
   } else {
     clearGlobeAtmosphere(map);
@@ -484,11 +520,622 @@ function getDistrictBoundsFilter(map, provinceFilterId) {
   ];
 }
 
+const PERU_COUNTRY_SHELL_LAYERS = [
+  "peru-country-fill",
+  "peru-country-border-outer",
+  "peru-country-border-inner",
+];
+
+const COUNTRY_DEPT_BORDER_LAYERS = [
+  "peru-regions-dept-glow",
+  "peru-regions-dept-line",
+];
+
+function addPeruCountryShellLayers(map, onCountryClick) {
+  if (map.getSource("peru-country-shell")) return;
+
+  const before = map.getLayer("peru-regions-fill")
+    ? "peru-regions-fill"
+    : undefined;
+
+  map.addSource("peru-country-shell", {
+    type: "geojson",
+    data: getPeruCountryFeatureCollection(),
+    generateId: true,
+  });
+
+  map.addLayer(
+    {
+      id: "peru-country-fill",
+      type: "fill",
+      source: "peru-country-shell",
+      layout: { visibility: "none" },
+      paint: {
+        "fill-color": [
+          "case",
+          ["boolean", ["feature-state", "focused"], false],
+          "rgba(72, 130, 200, 0.32)",
+          "rgba(72, 130, 200, 0.1)",
+        ],
+        "fill-opacity": 1,
+      },
+    },
+    before,
+  );
+
+  map.addLayer(
+    {
+      id: "peru-country-border-outer",
+      type: "line",
+      source: "peru-country-shell",
+      layout: {
+        visibility: "none",
+        "line-join": "round",
+        "line-cap": "round",
+      },
+      paint: {
+        "line-color": visitorThinWhiteBorderPaint["line-color"],
+        "line-width": visitorThinWhiteBorderPaint["line-width"],
+        "line-opacity": visitorThinWhiteBorderPaint["line-opacity"],
+      },
+    },
+    before,
+  );
+
+  map.addLayer(
+    {
+      id: "peru-country-border-inner",
+      type: "line",
+      source: "peru-country-shell",
+      layout: {
+        visibility: "none",
+        "line-join": "round",
+        "line-cap": "round",
+      },
+      paint: {
+        "line-color": visitorThinWhiteBorderPaint["line-color"],
+        "line-width": visitorThinWhiteBorderPaint["line-width"],
+        "line-opacity": visitorThinWhiteBorderPaint["line-opacity"],
+      },
+    },
+    before,
+  );
+
+  wireHoverHighlight(map, "peru-country-shell", "peru-country-fill");
+  if (onCountryClick) {
+    map.on("click", "peru-country-fill", onCountryClick);
+  }
+}
+
+function clearAdminFeatureSelection(map, selectionRef) {
+  selectionRef.current.forEach(({ source, id }) => {
+    map.setFeatureState({ source, id }, { selected: false });
+  });
+  selectionRef.current = [];
+}
+
+function selectAdminFeatureBySlug(map, sourceId, slug, selectionRef) {
+  if (!slug || !map.getSource(sourceId)) return;
+  const matches = map.querySourceFeatures(sourceId, {
+    filter: ["==", ["get", "slug"], slug],
+  });
+  matches.forEach((feature) => {
+    if (feature.id == null) return;
+    map.setFeatureState(
+      { source: sourceId, id: feature.id },
+      { selected: true },
+    );
+    selectionRef.current.push({ source: sourceId, id: feature.id });
+  });
+}
+
+function setPeruCountryShellFocused(map, focused) {
+  if (!map.getSource("peru-country-shell")) return;
+  map.querySourceFeatures("peru-country-shell").forEach((feature) => {
+    if (feature.id == null) return;
+    map.setFeatureState(
+      { source: "peru-country-shell", id: feature.id },
+      { focused },
+    );
+  });
+}
+
+function isVisitorCountryFocus(options = {}) {
+  return Boolean(
+    options.visitorV2 &&
+      options.filter?.country &&
+      !options.filter?.region,
+  );
+}
+
+function ensureRegionScopeBordersOnTop(map) {
+  const beforeProvinces = map.getLayer("peru-provinces-fill")
+    ? "peru-provinces-fill"
+    : undefined;
+
+  ["peru-regions-border-outer", "peru-regions-border"].forEach((layerId) => {
+    if (map.getLayer(layerId)) {
+      map.moveLayer(layerId, beforeProvinces);
+    }
+  });
+}
+
+function ensureRegionLayersOnTop(map) {
+  const beforeLabels = map.getLayer("peru-regions-labels")
+    ? "peru-regions-labels"
+    : undefined;
+
+  [
+    "peru-regions-dept-glow",
+    "peru-regions-dept-line",
+    "peru-regions-border-outer",
+    "peru-regions-border",
+  ].forEach((layerId) => {
+    if (map.getLayer(layerId)) {
+      map.moveLayer(layerId, beforeLabels);
+    }
+  });
+}
+
+function addCountryDepartmentOutlineLayers(map) {
+  if (map.getLayer("peru-regions-dept-line")) return;
+
+  const before = map.getLayer("peru-regions-labels")
+    ? "peru-regions-labels"
+    : undefined;
+
+  map.addLayer(
+    {
+      id: "peru-regions-dept-glow",
+      type: "line",
+      source: "peru-regions",
+      layout: {
+        visibility: "none",
+        "line-join": "round",
+        "line-cap": "round",
+      },
+      paint: {
+        "line-color": "rgba(255, 200, 120, 0.5)",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 4, 4.2, 6, 5.5, 8, 6],
+        "line-blur": 0.35,
+      },
+    },
+    before,
+  );
+
+  map.addLayer(
+    {
+      id: "peru-regions-dept-line",
+      type: "line",
+      source: "peru-regions",
+      layout: {
+        visibility: "none",
+        "line-join": "round",
+        "line-cap": "round",
+      },
+      paint: {
+        "line-color": visitorThinWhiteBorderPaint["line-color"],
+        "line-width": visitorThinWhiteBorderPaint["line-width"],
+        "line-opacity": visitorThinWhiteBorderPaint["line-opacity"],
+      },
+    },
+    before,
+  );
+}
+
+function applyVisitorCountryFillStyle(map) {
+  if (!map.getLayer("peru-regions-fill")) return;
+
+  map.setPaintProperty("peru-regions-fill", "fill-color", [
+    "case",
+    ["==", ["get", "has_photo"], true],
+    "#ffffff",
+    "rgba(255, 255, 255, 0.02)",
+  ]);
+  map.setPaintProperty("peru-regions-fill", "fill-opacity", [
+    "case",
+    ["==", ["get", "has_photo"], true],
+    1,
+    0.12,
+  ]);
+
+  if (map.getLayer("peru-country-fill") && map.getLayer("peru-regions-fill")) {
+    map.moveLayer("peru-country-fill", "peru-regions-fill");
+  }
+  if (map.getLayer("peru-regions-fill") && map.getLayer("peru-regions-dept-line")) {
+    map.moveLayer("peru-regions-fill", "peru-regions-dept-line");
+  }
+}
+
+function applyVisitorCountryLineStyle(map) {
+  applyVisitorThinWhiteLine(map, "peru-country-border-inner");
+  applyVisitorThinWhiteLine(map, "peru-regions-dept-line");
+  setLayerVisibility(map, ["peru-country-border-outer"], false);
+  setLayerVisibility(map, ["peru-regions-dept-glow"], false);
+  setLayerVisibility(
+    map,
+    ["peru-regions-border", "peru-regions-border-outer"],
+    false,
+  );
+  setLayerVisibility(map, ["peru-regions-dept-line", "peru-country-border-inner"], true);
+}
+
+function applyVisitorThinWhiteLine(map, layerId) {
+  if (!map.getLayer(layerId)) return;
+  map.setPaintProperty(
+    layerId,
+    "line-color",
+    visitorThinWhiteBorderPaint["line-color"],
+  );
+  map.setPaintProperty(
+    layerId,
+    "line-width",
+    visitorThinWhiteBorderPaint["line-width"],
+  );
+  map.setPaintProperty(
+    layerId,
+    "line-opacity",
+    visitorThinWhiteBorderPaint["line-opacity"],
+  );
+  if (map.getPaintProperty(layerId, "line-blur") != null) {
+    map.setPaintProperty(layerId, "line-blur", 0);
+  }
+}
+
+function setCountryDepartmentOutlinesVisible(map, visible) {
+  setLayerVisibility(map, COUNTRY_DEPT_BORDER_LAYERS, visible);
+}
+
+function clearPeruRegionsScopeFilter(map) {
+  if (map.getLayer("peru-regions-border")) {
+    map.setFilter("peru-regions-border", null);
+  }
+  if (map.getLayer("peru-regions-border-outer")) {
+    map.setFilter("peru-regions-border-outer", [
+      "boolean",
+      ["feature-state", "selected"],
+      false,
+    ]);
+  }
+}
+
+function applyPeruRegionsScopeFilter(map, regionSlug) {
+  if (!regionSlug) {
+    clearPeruRegionsScopeFilter(map);
+    return;
+  }
+  const slugFilter = ["==", ["get", "slug"], regionSlug];
+  if (map.getLayer("peru-regions-border")) {
+    map.setFilter("peru-regions-border", slugFilter);
+  }
+  if (map.getLayer("peru-regions-border-outer")) {
+    map.setFilter("peru-regions-border-outer", slugFilter);
+  }
+}
+
+function hideCountryOnlyRegionLayers(map) {
+  setCountryDepartmentOutlinesVisible(map, false);
+  setLayerVisibility(
+    map,
+    ["peru-regions-dept-glow", "peru-regions-dept-line"],
+    false,
+  );
+}
+
+function ensureDistrictLayersOnTop(map) {
+  [
+    "peru-districts-fill",
+    "peru-districts-border",
+    "peru-districts-labels",
+  ].forEach((layerId) => {
+    if (map.getLayer(layerId)) {
+      map.moveLayer(layerId);
+    }
+  });
+}
+
+function applyVisitorV2RegionEmphasis(map, emphasized, options = {}) {
+  if (!map.getLayer("peru-regions-border")) return;
+
+  if (emphasized) {
+    setCountryDepartmentOutlinesVisible(map, true);
+    applyVisitorCountryLineStyle(map);
+    applyVisitorCountryFillStyle(map);
+  } else if (options.filter?.region && !options.filter?.province) {
+    setCountryDepartmentOutlinesVisible(map, false);
+    map.setPaintProperty("peru-regions-border", "line-color", "#fff8e8");
+    map.setPaintProperty(
+      "peru-regions-border",
+      "line-width",
+      ["interpolate", ["linear"], ["zoom"], 5, 2.4, 8, 3.2],
+    );
+    map.setPaintProperty("peru-regions-border", "line-opacity", 1);
+  } else {
+    setCountryDepartmentOutlinesVisible(map, false);
+    map.setPaintProperty("peru-regions-border", "line-color", [
+      "case",
+      ["boolean", ["feature-state", "selected"], false],
+      "#fff8e8",
+      "#ffffff",
+    ]);
+    map.setPaintProperty("peru-regions-border", "line-width", [
+      "case",
+      ["boolean", ["feature-state", "selected"], false],
+      ["interpolate", ["linear"], ["zoom"], 4, 2.2, 8, 3],
+      ["interpolate", ["linear"], ["zoom"], 4, 1.6, 6.5, 2.2],
+    ]);
+    map.setPaintProperty("peru-regions-border", "line-opacity", 1);
+    if (map.getLayer("peru-regions-fill")) {
+      map.setPaintProperty("peru-regions-fill", "fill-opacity", [
+        "case",
+        ["boolean", ["feature-state", "selected"], false],
+        0.9,
+        ["boolean", ["feature-state", "hover"], false],
+        0.92,
+        0.78,
+      ]);
+    }
+  }
+}
+
+function isVisitorRegionFocus(options = {}) {
+  return Boolean(
+    options.visitorV2 &&
+      options.filter?.region &&
+      !options.filter?.province,
+  );
+}
+
+function syncVisitorV2Presentation(map, provinceFilterId, options = {}) {
+  syncAdminLevelVisibility(map, provinceFilterId, options);
+  if (!options.visitorV2) return;
+
+  if (isVisitorCountryFocus(options)) {
+    ensureRegionLayersOnTop(map);
+    applyVisitorV2RegionEmphasis(map, true, options);
+    return;
+  }
+
+  if (isVisitorRegionFocus(options)) {
+    ensureRegionScopeBordersOnTop(map);
+    applyVisitorV2RegionEmphasis(map, false, options);
+    if (map.getLayer("peru-regions-border-outer")) {
+      map.setPaintProperty(
+        "peru-regions-border-outer",
+        "line-width",
+        ["interpolate", ["linear"], ["zoom"], 5, 3.2, 8, 4.5],
+      );
+    }
+    return;
+  }
+
+  applyVisitorV2RegionEmphasis(map, false, options);
+}
+
+function applyVisitorV2Selection(map, filter, selectionRef) {
+  clearAdminFeatureSelection(map, selectionRef);
+  setPeruCountryShellFocused(map, false);
+  if (!filter?.country) return;
+
+  if (!filter.region) {
+    setPeruCountryShellFocused(map, true);
+    return;
+  }
+
+  if (filter.region && !filter.province) {
+    selectAdminFeatureBySlug(
+      map,
+      "peru-regions",
+      filter.region,
+      selectionRef,
+    );
+    return;
+  }
+
+  if (filter.province && !filter.district) {
+    selectAdminFeatureBySlug(
+      map,
+      "peru-provinces",
+      filter.province,
+      selectionRef,
+    );
+  }
+}
+
 /** Un solo nivel admin visible — evita líneas superpuestas al hacer zoom */
 function syncAdminLevelVisibility(map, provinceFilterId, options = {}) {
-  const { pinned = false, hideWorld = false } = options;
+  const {
+    pinned = false,
+    hideWorld = false,
+    visitorV2 = false,
+    filter = null,
+  } = options;
   const focus = Boolean(provinceFilterId);
   const zoom = map.getZoom();
+
+  if (visitorV2 && filter?.country && !filter?.region) {
+    clearPeruRegionsScopeFilter(map);
+    setLayerVisibility(map, ["peru-country-border-inner"], true);
+    setLayerVisibility(
+      map,
+      ["peru-country-fill", "peru-country-border-outer"],
+      false,
+    );
+    setLayerVisibility(
+      map,
+      [
+        "peru-regions-fill",
+        "peru-regions-dept-line",
+        "peru-regions-labels",
+      ],
+      true,
+    );
+    setLayerVisibility(
+      map,
+      [
+        "peru-regions-border",
+        "peru-regions-border-outer",
+        "peru-regions-dept-glow",
+        "peru-country-border-outer",
+      ],
+      false,
+    );
+    setLayerVisibility(
+      map,
+      [
+        "peru-provinces-fill",
+        "peru-provinces-border",
+        "peru-provinces-labels",
+      ],
+      false,
+    );
+    setLayerVisibility(
+      map,
+      ["peru-districts-fill", "peru-districts-border", "peru-districts-labels"],
+      false,
+    );
+    setLayerVisibility(map, ["world-countries-fill", "world-countries-border"], false);
+    return;
+  }
+
+  if (visitorV2 && !filter?.country) {
+    setLayerVisibility(map, PERU_COUNTRY_SHELL_LAYERS, false);
+    setCountryDepartmentOutlinesVisible(map, false);
+    setLayerVisibility(
+      map,
+      [
+        "peru-regions-fill",
+        "peru-regions-border",
+        "peru-regions-border-outer",
+        "peru-regions-dept-glow",
+        "peru-regions-dept-line",
+        "peru-regions-labels",
+        "peru-provinces-fill",
+        "peru-provinces-border",
+        "peru-provinces-labels",
+        "peru-districts-fill",
+        "peru-districts-border",
+        "peru-districts-labels",
+      ],
+      false,
+    );
+    setLayerVisibility(
+      map,
+      ["world-countries-fill", "world-countries-border"],
+      true,
+    );
+    return;
+  }
+
+  if (visitorV2 && filter?.region && !filter?.province) {
+    setLayerVisibility(map, PERU_COUNTRY_SHELL_LAYERS, false);
+    hideCountryOnlyRegionLayers(map);
+    setLayerVisibility(
+      map,
+      ["peru-regions-fill", "peru-regions-labels"],
+      false,
+    );
+    applyPeruRegionsScopeFilter(map, filter.region);
+    setLayerVisibility(
+      map,
+      ["peru-regions-border", "peru-regions-border-outer"],
+      true,
+    );
+    setLayerVisibility(
+      map,
+      [
+        "peru-provinces-fill",
+        "peru-provinces-border",
+        "peru-provinces-labels",
+      ],
+      true,
+    );
+    setLayerVisibility(
+      map,
+      ["peru-districts-fill", "peru-districts-border", "peru-districts-labels"],
+      false,
+    );
+    setLayerVisibility(
+      map,
+      ["world-countries-fill", "world-countries-border"],
+      false,
+    );
+    return;
+  }
+
+  if (visitorV2 && filter?.province && !filter?.district) {
+    setLayerVisibility(map, PERU_COUNTRY_SHELL_LAYERS, false);
+    hideCountryOnlyRegionLayers(map);
+    clearPeruRegionsScopeFilter(map);
+    setLayerVisibility(
+      map,
+      [
+        "peru-regions-fill",
+        "peru-regions-border",
+        "peru-regions-border-outer",
+        "peru-regions-labels",
+      ],
+      false,
+    );
+    setLayerVisibility(
+      map,
+      [
+        "peru-provinces-fill",
+        "peru-provinces-border",
+        "peru-provinces-labels",
+      ],
+      true,
+    );
+    const showDistricts = pinned || zoom >= PROVINCE_FOCUS_MIN_ZOOM - 1.2;
+    setLayerVisibility(
+      map,
+      ["peru-districts-fill", "peru-districts-border"],
+      showDistricts,
+    );
+    setLayerVisibility(map, ["peru-districts-labels"], showDistricts);
+    setLayerVisibility(
+      map,
+      ["world-countries-fill", "world-countries-border"],
+      false,
+    );
+    return;
+  }
+
+  if (visitorV2 && filter?.district) {
+    setLayerVisibility(map, PERU_COUNTRY_SHELL_LAYERS, false);
+    hideCountryOnlyRegionLayers(map);
+    clearPeruRegionsScopeFilter(map);
+    setLayerVisibility(
+      map,
+      [
+        "peru-regions-fill",
+        "peru-regions-border",
+        "peru-regions-border-outer",
+        "peru-regions-labels",
+      ],
+      false,
+    );
+    setLayerVisibility(
+      map,
+      [
+        "peru-provinces-fill",
+        "peru-provinces-border",
+        "peru-provinces-labels",
+      ],
+      false,
+    );
+    setLayerVisibility(
+      map,
+      ["peru-districts-fill", "peru-districts-border", "peru-districts-labels"],
+      true,
+    );
+    setLayerVisibility(
+      map,
+      ["world-countries-fill", "world-countries-border"],
+      false,
+    );
+    return;
+  }
 
   if (hideWorld) {
     setLayerVisibility(
@@ -504,6 +1151,7 @@ function syncAdminLevelVisibility(map, provinceFilterId, options = {}) {
       [
         "peru-regions-fill",
         "peru-regions-border",
+        "peru-regions-border-outer",
         "peru-regions-labels",
         "peru-provinces-fill",
         "peru-provinces-border",
@@ -571,7 +1219,7 @@ function syncAdminLevelVisibility(map, provinceFilterId, options = {}) {
 
   setLayerVisibility(
     map,
-    ["peru-regions-fill", "peru-regions-border"],
+    ["peru-regions-fill", "peru-regions-border", "peru-regions-border-outer"],
     showDept,
   );
   setLayerVisibility(map, ["peru-regions-labels"], showDept);
@@ -681,8 +1329,11 @@ function wireHoverHighlight(map, sourceId, layerId) {
   map.on("mouseleave", layerId, clearHover);
 }
 
-function addWorldCountryLayers(map, onWorldClick) {
+function addWorldCountryLayers(map, onWorldClick, options = {}) {
   if (map.getSource("world-countries")) return;
+
+  const worldLayerOpts =
+    options.clickableAtAllZooms === true ? {} : { maxzoom: 6 };
 
   map.addSource("world-countries", {
     type: "geojson",
@@ -694,10 +1345,12 @@ function addWorldCountryLayers(map, onWorldClick) {
     id: "world-countries-fill",
     type: "fill",
     source: "world-countries",
-    maxzoom: 6,
+    ...worldLayerOpts,
     paint: {
       "fill-color": [
         "case",
+        ["==", ["get", "ADMIN"], "Peru"],
+        "rgba(100, 160, 220, 0.26)",
         ["boolean", ["feature-state", "hover"], false],
         "rgba(120, 160, 220, 0.35)",
         "rgba(255, 255, 255, 0.02)",
@@ -710,7 +1363,7 @@ function addWorldCountryLayers(map, onWorldClick) {
     id: "world-countries-border",
     type: "line",
     source: "world-countries",
-    maxzoom: 6,
+    ...worldLayerOpts,
     layout: { "line-join": "round", "line-cap": "round" },
     paint: {
       "line-color": "rgba(255,255,255,0.22)",
@@ -723,7 +1376,14 @@ function addWorldCountryLayers(map, onWorldClick) {
 }
 
 function applyProvinceFocusMode(map, provinceFilterId, options = {}) {
-  syncAdminLevelVisibility(map, provinceFilterId, options);
+  syncVisitorV2Presentation(map, provinceFilterId, options);
+}
+
+function syncProjectionForScope(map, provinceFilterId, visOpts = {}) {
+  syncProjection(map, provinceFilterId, {
+    visitorCountryFocus: isVisitorCountryFocus(visOpts),
+    revealBackdropStars: Boolean(visOpts.visitorV2),
+  });
 }
 
 function addPeruRegionLayers(map, places, entriesGrouped, onRegionClick) {
@@ -745,13 +1405,32 @@ function addPeruRegionLayers(map, places, entriesGrouped, onRegionClick) {
       type: "fill",
       source: "peru-regions",
       paint: {
-        "fill-color": fillWithHover(regionFillColor, "#5a6878"),
+        "fill-color": [
+          "case",
+          ["boolean", ["feature-state", "selected"], false],
+          "#3a5268",
+          fillWithHover(regionFillColor, "#5a6878"),
+        ],
         "fill-opacity": [
           "case",
+          ["boolean", ["feature-state", "selected"], false],
+          0.9,
           ["boolean", ["feature-state", "hover"], false],
           0.92,
           0.78,
         ],
+      },
+    });
+
+    map.addLayer({
+      id: "peru-regions-border-outer",
+      type: "line",
+      source: "peru-regions",
+      layout: { "line-join": "round", "line-cap": "round", visibility: "none" },
+      filter: ["boolean", ["feature-state", "selected"], false],
+      paint: {
+        "line-color": "rgba(255, 200, 120, 0.88)",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 4, 3.8, 8, 5.2],
       },
     });
 
@@ -761,8 +1440,18 @@ function addPeruRegionLayers(map, places, entriesGrouped, onRegionClick) {
       source: "peru-regions",
       layout: { "line-join": "round", "line-cap": "round" },
       paint: {
-        "line-color": "#ffffff",
-        "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.6, 6.5, 2.2],
+        "line-color": [
+          "case",
+          ["boolean", ["feature-state", "selected"], false],
+          "#fff8e8",
+          "#ffffff",
+        ],
+        "line-width": [
+          "case",
+          ["boolean", ["feature-state", "selected"], false],
+          ["interpolate", ["linear"], ["zoom"], 4, 2.2, 8, 3],
+          ["interpolate", ["linear"], ["zoom"], 4, 1.6, 6.5, 2.2],
+        ],
         "line-opacity": 1,
       },
     });
@@ -780,6 +1469,7 @@ function addPeruRegionLayers(map, places, entriesGrouped, onRegionClick) {
 
     wireHoverHighlight(map, "peru-regions", "peru-regions-fill");
     map.on("click", "peru-regions-fill", onRegionClick);
+    addCountryDepartmentOutlineLayers(map);
   } else {
     map.getSource("peru-regions").setData(regionsGeoJSON);
     syncLabelSource(map, "peru-regions-label-pts", regionsGeoJSON);
@@ -801,31 +1491,128 @@ async function applyPhotoPatterns(
   provinceFilter,
   departmentFilter,
   districtGeoJSON = null,
+  scopedFilter = null,
 ) {
   if (!map?.isStyleLoaded()) return;
 
-  if (map.getSource("peru-regions")) {
-    const geo = enrichPeruDepartments(getRawPeruDepartments(), places, grouped);
-    await syncGeoJSONPhotoPatterns(map, geo, "peru-regions", [
-      "peru-regions-fill",
-    ]);
+  const level = visitorPhotoLevel(scopedFilter ?? {});
+  const clearPattern = (layerId) => {
+    if (map.getLayer(layerId)) {
+      map.setPaintProperty(layerId, "fill-pattern", "");
+    }
+  };
+
+  if (level === "globe") {
+    if (map.getSource("world-countries")) {
+      const shell = getPeruCountryFeatureCollection();
+      const photoState = buildCountryShellPhotoState(places, grouped);
+      const peruFeature = shell.features[0]
+        ? {
+            ...shell.features[0],
+            properties: {
+              ...shell.features[0].properties,
+              ...photoState,
+              pattern_id: "",
+            },
+          }
+        : null;
+      const globeGeo = {
+        ...worldCountries,
+        features: worldCountries.features.map((feature) => {
+          const admin = feature.properties.ADMIN || feature.properties.NAME;
+          const iso = feature.properties.ISO_A3 || feature.properties.ADM0_A3;
+          if ((admin === "Peru" || iso === "PER") && peruFeature) {
+            return {
+              ...peruFeature,
+              id: feature.id,
+              properties: {
+                ...peruFeature.properties,
+                ADMIN: admin,
+              },
+            };
+          }
+          return {
+            ...feature,
+            properties: { ...feature.properties, pattern_id: "", photo_urls: "" },
+          };
+        }),
+      };
+      await syncGeoJSONPhotoPatterns(map, globeGeo, "world-countries", [
+        "world-countries-fill",
+      ]);
+    }
+    clearPattern("peru-regions-fill");
+    clearPattern("peru-provinces-fill");
+    clearPattern("peru-country-fill");
+    clearPattern("peru-districts-fill");
+    return;
   }
-  if (map.getSource("peru-provinces")) {
-    const geo = enrichPeruProvinces(
-      getActiveProvincesGeoJSON(),
-      places,
-      grouped,
-      provinceFilter,
-      departmentFilter,
-    );
-    await syncGeoJSONPhotoPatterns(map, geo, "peru-provinces", [
-      "peru-provinces-fill",
-    ]);
+
+  clearPattern("world-countries-fill");
+  if (map.getSource("world-countries")) {
+    map.getSource("world-countries").setData(worldCountries);
   }
-  if (map.getSource("peru-districts") && districtGeoJSON) {
-    await syncGeoJSONPhotoPatterns(map, districtGeoJSON, "peru-districts", [
-      "peru-districts-fill",
-    ]);
+
+  if (level === "country" || level === "region") {
+    if (map.getSource("peru-regions")) {
+      const geo = enrichPeruDepartments(
+        getRawPeruDepartments(),
+        places,
+        grouped,
+      );
+      if (level === "country") {
+        await syncGeoJSONPhotoPatterns(map, geo, "peru-regions", [
+          "peru-regions-fill",
+        ]);
+      } else {
+        map.getSource("peru-regions").setData(geo);
+        clearPattern("peru-regions-fill");
+      }
+    }
+    clearPattern("peru-country-fill");
+  } else {
+    clearPattern("peru-regions-fill");
+    clearPattern("peru-country-fill");
+  }
+
+  if (level === "region") {
+    if (map.getSource("peru-provinces")) {
+      const geo = enrichPeruProvinces(
+        getActiveProvincesGeoJSON(),
+        places,
+        grouped,
+        provinceFilter,
+        departmentFilter,
+      );
+      await syncGeoJSONPhotoPatterns(map, geo, "peru-provinces", [
+        "peru-provinces-fill",
+      ]);
+    }
+    clearPattern("peru-districts-fill");
+  } else {
+    clearPattern("peru-provinces-fill");
+    if (map.getSource("peru-provinces")) {
+      const geo = enrichPeruProvinces(
+        getActiveProvincesGeoJSON(),
+        places,
+        grouped,
+        provinceFilter,
+        departmentFilter,
+      );
+      map.getSource("peru-provinces").setData(geo);
+    }
+  }
+
+  if (level === "province" || level === "district") {
+    if (map.getSource("peru-districts") && districtGeoJSON) {
+      await syncGeoJSONPhotoPatterns(map, districtGeoJSON, "peru-districts", [
+        "peru-districts-fill",
+      ]);
+    } else {
+      clearPattern("peru-districts-fill");
+    }
+  } else {
+    clearPattern("peru-districts-fill");
   }
 }
 
@@ -838,6 +1625,7 @@ export default function GlobeMap({
   onMapFilterChange,
   onOpenPanel,
   scope = null,
+  hideMapControls = false,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -859,6 +1647,7 @@ export default function GlobeMap({
   const onOpenPanelRef = useRef(onOpenPanel);
   const onMapFilterChangeRef = useRef(onMapFilterChange);
   const scopeRef = useRef(scope);
+  const hideMapControlsRef = useRef(hideMapControls);
   const appliedNavKeyRef = useRef("");
   const navGenerationRef = useRef(0);
   const navBusyRef = useRef(false);
@@ -866,11 +1655,13 @@ export default function GlobeMap({
   const scopedBoundsRef = useRef(null);
   const scopedFilterRef = useRef(mapFilter);
   const mapFilterRef = useRef(mapFilter);
+  const adminSelectionRef = useRef([]);
   placesRef.current = places;
   entriesGroupedRef.current = groupEntriesBySlug(entries);
   onOpenPanelRef.current = onOpenPanel;
   onMapFilterChangeRef.current = onMapFilterChange;
   scopeRef.current = scope;
+  hideMapControlsRef.current = hideMapControls;
   mapFilterRef.current = mapFilter;
   scopedFilterRef.current = mapFilter;
 
@@ -878,6 +1669,8 @@ export default function GlobeMap({
     () => ({
       pinned: pinnedFocusRef.current || isChachapoyasScope(scopeRef.current),
       hideWorld: isChachapoyasScope(scopeRef.current),
+      visitorV2: isVisitorV2Scope(scopeRef.current),
+      filter: scopedFilterRef.current,
     }),
     [],
   );
@@ -912,8 +1705,25 @@ export default function GlobeMap({
       provinceFilterRef.current,
       departmentFilterRef.current,
       districtGeoJSON ?? lastDistrictGeoRef.current,
+      scopedFilterRef.current,
     );
+    if (isVisitorV2Scope(scopeRef.current)) {
+      const level = visitorPhotoLevel(scopedFilterRef.current ?? {});
+      if (level === "country") {
+        ensureRegionLayersOnTop(map);
+        applyVisitorCountryFillStyle(map);
+      }
+      if (level === "region") {
+        ensureRegionScopeBordersOnTop(map);
+      }
+      if (level === "province" || level === "district") {
+        ensureDistrictLayersOnTop(map);
+      }
+    }
   }, []);
+
+  const runPhotoPatternsRef = useRef(null);
+  runPhotoPatternsRef.current = runPhotoPatterns;
 
   const applyFilterToMapRef = useRef(null);
 
@@ -929,20 +1739,29 @@ export default function GlobeMap({
     onMapFilterChangeRef.current?.(safe);
   }, []);
 
+  const navigateToPeruCountry = useCallback(() => {
+    navigateFromFilter(PERU_COUNTRY_FILTER);
+  }, [navigateFromFilter]);
+
   const handleWorldClick = useCallback(
     (e) => {
       if (isChachapoyasScope(scopeRef.current)) return;
       const map = mapRef.current;
       const feature = e.features?.[0];
-      if (!map || !feature) return;
+      if (!map || !feature || !isPeruWorldFeature(feature)) return;
 
-      const admin = feature.properties.ADMIN || feature.properties.NAME;
-      const iso = feature.properties.ISO_A3 || feature.properties.ADM0_A3;
-      if (admin !== "Peru" && iso !== "PER") return;
-
-      navigateFromFilter({ ...EMPTY_FILTER, country: "peru" });
+      navigateToPeruCountry();
     },
-    [navigateFromFilter],
+    [navigateToPeruCountry],
+  );
+
+  const handlePeruCountryClick = useCallback(
+    (e) => {
+      if (isChachapoyasScope(scopeRef.current)) return;
+      if (!isVisitorV2Scope(scopeRef.current)) return;
+      navigateToPeruCountry();
+    },
+    [navigateToPeruCountry],
   );
 
   const handleRegionClick = useCallback(
@@ -957,6 +1776,26 @@ export default function GlobeMap({
         departmentToSlug(feature.properties.NOMBDEP);
       if (!slug) return;
 
+      const current = scopedFilterRef.current;
+      if (isVisitorV2Scope(scopeRef.current)) {
+        if (!current?.country) {
+          navigateToPeruCountry();
+          return;
+        }
+        // 2.º toque mismo departamento → carrusel (como provincia/distrito)
+        if (current?.region === slug && !current?.province) {
+          onOpenPanelRef.current?.(slug);
+          return;
+        }
+        if (
+          current?.region &&
+          !current?.province &&
+          slug !== current.region
+        ) {
+          return;
+        }
+      }
+
       let filter = filterFromSlug(placesRef.current, slug);
       if (!filter.country) {
         filter = {
@@ -968,7 +1807,7 @@ export default function GlobeMap({
       }
       navigateFromFilter(filter, featureBounds(feature.geometry));
     },
-    [navigateFromFilter],
+    [navigateFromFilter, navigateToPeruCountry],
   );
 
   const handleProvinceClick = useCallback(
@@ -979,6 +1818,20 @@ export default function GlobeMap({
       if (!map || !feature) return;
 
       const filter = filterFromProvinceFeature(placesRef.current, feature);
+      const provSlug = filter.province;
+
+      if (isVisitorV2Scope(scopeRef.current)) {
+        const current = scopedFilterRef.current;
+        if (current?.province === provSlug && !current?.district) {
+          onOpenPanelRef.current?.(provSlug);
+          return;
+        }
+        if (!current?.province || current.province !== provSlug) {
+          navigateFromFilter(filter, featureBounds(feature.geometry));
+          return;
+        }
+      }
+
       navigateFromFilter(filter, featureBounds(feature.geometry));
     },
     [navigateFromFilter],
@@ -995,6 +1848,21 @@ export default function GlobeMap({
       if (!slug) return;
 
       const filter = filterFromSlug(placesRef.current, slug);
+
+      if (isVisitorV2Scope(scopeRef.current)) {
+        const current = scopedFilterRef.current;
+        if (current?.district === slug) {
+          onOpenPanelRef.current?.(slug);
+          return;
+        }
+        if (current?.province && !current?.district) {
+          onOpenPanelRef.current?.(slug);
+          return;
+        }
+        navigateFromFilter(filter, featureBounds(feature.geometry));
+        return;
+      }
+
       navigateFromFilter(filter, featureBounds(feature.geometry));
       onOpenPanelRef.current?.(slug);
     },
@@ -1006,8 +1874,16 @@ export default function GlobeMap({
       if (!map.getSource("peru-districts")) return;
       const zoom = map.getZoom();
       const filter = provinceFilterRef.current;
+      const visitorProvincePinned =
+        isVisitorV2Scope(scopeRef.current) &&
+        Boolean(scopedFilterRef.current?.province) &&
+        !scopedFilterRef.current?.district;
 
-      if (!isAmazonasProvinceId(filter) && zoom < DISTRICT_MIN_ZOOM) {
+      if (
+        !isAmazonasProvinceId(filter) &&
+        zoom < DISTRICT_MIN_ZOOM &&
+        !visitorProvincePinned
+      ) {
         return;
       }
 
@@ -1077,6 +1953,14 @@ export default function GlobeMap({
 
   const autoDetectAdminContext = useCallback((map) => {
     if (pinnedFocusRef.current) return;
+    if (
+      isVisitorV2Scope(scopeRef.current) &&
+      !scopedFilterRef.current?.country
+    ) {
+      provinceFilterRef.current = null;
+      departmentFilterRef.current = null;
+      return;
+    }
 
     const zoom = map.getZoom();
     const { lng, lat } = map.getCenter();
@@ -1189,11 +2073,12 @@ export default function GlobeMap({
       safeFilter = clampFilterToChachapoyas(safeFilter);
     }
 
-    const navKey = filterKey(safeFilter);
-    const gen = ++navGenerationRef.current;
-    navBusyRef.current = true;
+      const navKey = filterKey(safeFilter);
+      const gen = ++navGenerationRef.current;
+      navBusyRef.current = true;
+      const visitorV2 = isVisitorV2Scope(scopeRef.current);
 
-    try {
+      try {
       scopedFilterRef.current = safeFilter;
 
       const { pinned, provinceFilterRef: prov, departmentFilterRef: dept } =
@@ -1222,10 +2107,12 @@ export default function GlobeMap({
         map.setMaxBounds(null);
         map.setMinZoom(0);
         map.setMaxZoom(18);
+        clearAdminFeatureSelection(map, adminSelectionRef);
+        setPeruCountryShellFocused(map, false);
         map.flyTo({
           center: GLOBE_CENTER,
           zoom: GLOBE_ZOOM,
-          duration: 1400,
+          duration: visitorV2 ? 1200 : 1400,
           essential: true,
         });
         appliedNavKeyRef.current = navKey;
@@ -1234,6 +2121,19 @@ export default function GlobeMap({
         appliedNavKeyRef.current = navKey;
         if (isScoped) {
           scopedFitNow(map, bounds, isDistrictView);
+        } else if (visitorV2) {
+          fitMapToScopedBounds(map, bounds, {
+            district: isDistrictView,
+            duration: 900,
+            zoomOutBias: safeFilter.district
+              ? 0.85
+              : safeFilter.province
+                ? 0.95
+                : safeFilter.region
+                  ? 1.0
+                  : 0.45,
+            minFitZoom: !safeFilter.region && !safeFilter.province ? 5.15 : undefined,
+          });
         }
       } else {
         console.warn("[EYL nav] bounds inválidos, se mantiene la vista", safeFilter);
@@ -1248,18 +2148,23 @@ export default function GlobeMap({
       if (gen !== navGenerationRef.current) return;
       await updateDistrictData(map);
       if (gen !== navGenerationRef.current) return;
-      await runPhotoPatterns(map);
-      if (gen !== navGenerationRef.current) return;
       applyProvinceFocusMode(map, prov, visOpts);
-      syncProjection(map, prov);
-      syncAdminLevelVisibility(map, prov, visOpts);
+      syncProjectionForScope(map, prov, visOpts);
+      if (visitorV2) {
+        applyVisitorV2Selection(map, safeFilter, adminSelectionRef);
+      }
+      if (gen !== navGenerationRef.current) return;
+      await runPhotoPatterns(map);
 
       if (isScoped && isValidBounds(scopedBoundsRef.current)) {
         fitMapToScopedBounds(map, scopedBoundsRef.current, {
           district: isDistrictView,
           duration: 0,
         });
-      } else if (isValidBounds(scopedBoundsRef.current)) {
+      } else if (
+        !visitorV2 &&
+        isValidBounds(scopedBoundsRef.current)
+      ) {
         const padding = getMapFitPadding(map);
         map.fitBounds(scopedBoundsRef.current, {
           padding,
@@ -1296,7 +2201,7 @@ export default function GlobeMap({
         adminCtxCacheRef.current.districtFilter = null;
         adminCtxCacheRef.current.boundsKey = null;
       } else {
-        syncAdminLevelVisibility(
+        applyProvinceFocusMode(
           map,
           provinceFilterRef.current,
           getFocusVisOptions(),
@@ -1321,7 +2226,10 @@ export default function GlobeMap({
 
   const syncLayers = useCallback(
     (map) => {
-      addWorldCountryLayers(map, handleWorldClick);
+      addWorldCountryLayers(map, handleWorldClick, {
+        clickableAtAllZooms: isVisitorV2Scope(scopeRef.current),
+      });
+      addPeruCountryShellLayers(map, handlePeruCountryClick);
       addPeruRegionLayers(
         map,
         placesRef.current,
@@ -1346,6 +2254,7 @@ export default function GlobeMap({
     },
     [
       handleWorldClick,
+      handlePeruCountryClick,
       handleRegionClick,
       handleProvinceClick,
       ensureDistrictLayers,
@@ -1357,10 +2266,12 @@ export default function GlobeMap({
     if (!containerRef.current || mapRef.current) return;
 
     const chachapoyas = isChachapoyasScope(scopeRef.current);
+    const visitorV2 = isVisitorV2Scope(scopeRef.current);
+    const transparentBg = visitorV2;
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: MAP_STYLE,
+      style: buildMapStyle(transparentBg),
       center: chachapoyas ? CHACHAPOYAS_CENTER : GLOBE_CENTER,
       zoom: chachapoyas ? CHACHAPOYAS_ZOOM : GLOBE_ZOOM,
       pitch: 0,
@@ -1373,10 +2284,27 @@ export default function GlobeMap({
       boxZoom: true,
     });
 
-    map.addControl(new maplibregl.NavigationControl(), "top-right");
-    if (!chachapoyas) {
-      map.addControl(new maplibregl.GlobeControl(), "top-right");
+    if (!hideMapControlsRef.current) {
+      map.addControl(new maplibregl.NavigationControl(), "top-right");
+      if (!chachapoyas) {
+        map.addControl(new maplibregl.GlobeControl(), "top-right");
+      }
     }
+
+    const resyncVisitorPresentation = (map) => {
+      if (!isVisitorV2Scope(scopeRef.current)) return;
+      const visOpts = getFocusVisOptions();
+      applyProvinceFocusMode(map, provinceFilterRef.current, visOpts);
+      syncProjectionForScope(map, provinceFilterRef.current, visOpts);
+      applyVisitorV2Selection(
+        map,
+        scopedFilterRef.current,
+        adminSelectionRef,
+      );
+      if (isVisitorCountryFocus(visOpts)) {
+        void runPhotoPatternsRef.current?.(map);
+      }
+    };
 
     map.on("load", async () => {
       if (chachapoyas) {
@@ -1384,16 +2312,20 @@ export default function GlobeMap({
         departmentFilterRef.current = "AMAZONAS";
         pinnedFocusRef.current = true;
       } else {
-        applyGlobeAtmosphere(map);
+        applyGlobeAtmosphere(map, { revealBackdropStars: visitorV2 });
       }
       syncLayers(map);
       await ensureDistrictLayers(map, chachapoyas);
-      syncAdminLevelVisibility(
+      applyProvinceFocusMode(
         map,
         provinceFilterRef.current,
         getFocusVisOptions(),
       );
-      syncProjection(map, provinceFilterRef.current);
+      syncProjectionForScope(
+        map,
+        provinceFilterRef.current,
+        getFocusVisOptions(),
+      );
       await runPhotoPatterns(map);
       setMapReady(true);
     });
@@ -1409,9 +2341,9 @@ export default function GlobeMap({
     };
 
     map.on("zoom", () => {
-      syncProjection(map, provinceFilterRef.current);
-      const zoom = map.getZoom();
       const visOpts = getFocusVisOptions();
+      syncProjectionForScope(map, provinceFilterRef.current, visOpts);
+      const zoom = map.getZoom();
       const focus = Boolean(provinceFilterRef.current);
       const band = focus
         ? visOpts.pinned || zoom >= PROVINCE_FOCUS_MIN_ZOOM
@@ -1424,28 +2356,23 @@ export default function GlobeMap({
             : "dist";
       if (adminCtxCacheRef.current.zoomBand !== band) {
         adminCtxCacheRef.current.zoomBand = band;
-        syncAdminLevelVisibility(
-          map,
-          provinceFilterRef.current,
-          visOpts,
-        );
+        applyProvinceFocusMode(map, provinceFilterRef.current, visOpts);
       }
     });
 
     map.on("moveend", () => {
       clearTimeout(moveTimer);
       moveTimer = setTimeout(() => {
+        resyncVisitorPresentation(map);
         scheduleAdminRefresh(map);
       }, 200);
     });
 
     map.on("zoomend", () => {
-      syncProjection(map, provinceFilterRef.current);
-      syncAdminLevelVisibility(
-        map,
-        provinceFilterRef.current,
-        getFocusVisOptions(),
-      );
+      const visOpts = getFocusVisOptions();
+      syncProjectionForScope(map, provinceFilterRef.current, visOpts);
+      applyProvinceFocusMode(map, provinceFilterRef.current, visOpts);
+      resyncVisitorPresentation(map);
       scheduleAdminRefresh(map);
     });
 

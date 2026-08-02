@@ -5,7 +5,6 @@ import {
   getFilterSummary,
   getProvinceOptions,
   getRegionOptions,
-  isAmazonasRegion,
 } from '../../lib/placeCatalog'
 import Button from '../ui/Button'
 import EditorSelect from '../ui/EditorSelect'
@@ -77,14 +76,20 @@ export default function EditorSidebar({
           />
         )}
 
-        {filter.region && isAmazonasRegion(filter.region) && (
+        {filter.region && (
           <EditorSelect
             label="Provincia"
             placeholder="Todas las provincias"
             value={filter.province}
             options={provinces}
             onChange={setProvince}
+            disabled={!provinces.length}
           />
+        )}
+        {filter.region && !provinces.length && (
+          <p className="rounded-lg bg-white/[0.03] px-3 py-2.5 text-xs leading-relaxed text-zinc-500 ring-1 ring-white/[0.06]">
+            Cargando provincias…
+          </p>
         )}
 
         {filter.province && (
@@ -100,7 +105,17 @@ export default function EditorSidebar({
 
         {!filter.country && (
           <p className="rounded-lg bg-amber-400/10 px-3 py-2.5 text-xs leading-relaxed text-amber-200/80 ring-1 ring-amber-400/20">
-            Vista global · Elige Perú y una región para filtrar o subir fotos.
+            Vista global · Elige Perú › región › provincia › distrito para filtrar o subir.
+          </p>
+        )}
+        {filter.country && filter.province && !filter.district && (
+          <p className="rounded-lg bg-amber-400/10 px-3 py-2.5 text-xs leading-relaxed text-amber-200/80 ring-1 ring-amber-400/20">
+            Elige un distrito. Las fotos solo se guardan en el distrito seleccionado.
+          </p>
+        )}
+        {filter.district && uploadPlace && (
+          <p className="rounded-lg bg-emerald-400/10 px-3 py-2.5 text-xs leading-relaxed text-emerald-200/80 ring-1 ring-emerald-400/20">
+            Listo · Las fotos se guardarán en <strong>{uploadPlace.name}</strong>.
           </p>
         )}
       </div>

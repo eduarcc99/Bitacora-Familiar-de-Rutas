@@ -15,7 +15,7 @@ export default function LoginModal({ open, onClose, onSuccess }) {
     setLoading(true)
     try {
       await signIn(email.trim(), password)
-      onSuccess()
+      onSuccess?.()
       onClose()
       setEmail('')
       setPassword('')
@@ -27,17 +27,25 @@ export default function LoginModal({ open, onClose, onSuccess }) {
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose} role="presentation">
+    <div
+      className="fixed inset-0 z-[100] grid place-items-center bg-black/70 p-4"
+      onClick={onClose}
+      role="presentation"
+    >
       <div
-        className="modal"
+        className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#12141a] p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-labelledby="login-title"
       >
-        <h2 id="login-title">Acceso editores</h2>
-        <p className="modal__sub">Solo tú y tu pareja pueden modificar el álbum.</p>
-        <form onSubmit={handleSubmit} className="form">
-          <label>
+        <h2 id="login-title" className="text-lg font-semibold text-zinc-50">
+          Acceso familiar
+        </h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Solo quienes tienen cuenta pueden gestionar fotos.
+        </p>
+        <form onSubmit={handleSubmit} className="mt-5 flex flex-col gap-4">
+          <label className="flex flex-col gap-1.5 text-xs font-medium text-zinc-400">
             Email
             <input
               type="email"
@@ -45,9 +53,10 @@ export default function LoginModal({ open, onClose, onSuccess }) {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
+              className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-amber-400/50"
             />
           </label>
-          <label>
+          <label className="flex flex-col gap-1.5 text-xs font-medium text-zinc-400">
             Contraseña
             <input
               type="password"
@@ -55,14 +64,23 @@ export default function LoginModal({ open, onClose, onSuccess }) {
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="current-password"
+              className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-amber-400/50"
             />
           </label>
-          {error && <p className="form-error">{error}</p>}
-          <div className="form-actions">
-            <button type="button" className="btn btn--ghost" onClick={onClose}>
+          {error && <p className="text-sm text-red-400">{error}</p>}
+          <div className="mt-1 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl px-4 py-2.5 text-sm font-medium text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+            >
               Cancelar
             </button>
-            <button type="submit" className="btn btn--primary" disabled={loading}>
+            <button
+              type="submit"
+              disabled={loading}
+              className="rounded-xl bg-amber-400 px-4 py-2.5 text-sm font-semibold text-zinc-950 hover:bg-amber-300 disabled:opacity-50"
+            >
               {loading ? 'Entrando…' : 'Entrar'}
             </button>
           </div>

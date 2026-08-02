@@ -7,7 +7,6 @@ import {
   getProvinceOptions,
   getRegionOptions,
   initDistrictCatalog,
-  isAmazonasRegion,
 } from '../lib/placeCatalog'
 
 export default function MapFilterBar({ places, filter, onChange }) {
@@ -93,13 +92,14 @@ export default function MapFilterBar({ places, filter, onChange }) {
           </label>
         )}
 
-        {filter.region && isAmazonasRegion(filter.region) && (
+        {filter.region && (
           <label className="map-filter-bar__field">
             <span className="sr-only">Provincia</span>
             <select
               className="map-filter-bar__select"
               value={filter.province ?? ''}
               onChange={(e) => setProvince(e.target.value || null)}
+              disabled={!provinces.length}
             >
               <option value="">Todas las provincias</option>
               {provinces.map((p) => (

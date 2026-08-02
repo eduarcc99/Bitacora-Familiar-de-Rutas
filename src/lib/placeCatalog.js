@@ -6,9 +6,14 @@ import {
 import {
   getAllDistrictPlaces,
   getDistrictPlace,
+  mergeDistrictGeoJSON,
   registerDistrictGeoJSON,
 } from '../data/districtPlaces'
-import { loadAmazonasDistricts } from '../data/regions'
+import {
+  getProvincePlace,
+  getProvincesForDepartment,
+} from '../data/provincePlaces'
+import { loadAmazonasDistricts, loadPeruDistricts } from '../data/regions'
 import { getPhotoPublicUrl } from './supabase'
 
 let districtsReady = false
@@ -35,8 +40,16 @@ export function resolveInitialFilter(places, initialSlug) {
 
 export async function initDistrictCatalog() {
   if (districtsReady) return getAllDistrictPlaces()
+  // Amazonas (sin cambios): GeoJSON detallado + slugs places.js
   const geo = await loadAmazonasDistricts()
   const list = registerDistrictGeoJSON(geo)
+  // Resto del Perú: merge sin pisar Amazonas
+  try {
+    const peruDistricts = await loadPeruDistricts()
+    mergeDistrictGeoJSON(peruDistricts, { skipAmazonas: true })
+  } catch (err) {
+    console.warn('Catálogo de distritos Perú (fuera de Amazonas):', err.message)
+  }
   districtsReady = true
   return list
 }
@@ -46,6 +59,7 @@ export function resolveCatalogPlace(places, slug) {
   return (
     getPlaceBySlug(places, slug) ||
     getDepartmentPlace(slug) ||
+    getProvincePlace(slug) ||
     getDistrictPlace(slug)
   )
 }
@@ -56,14 +70,19 @@ export function getCatalogChildren(places, parentSlug) {
   }
 
   const staticChildren = getChildren(places, parentSlug)
+  const provinceChildren = getProvincesForDepartment(parentSlug)
   const districtChildren = getAllDistrictPlaces()
     .filter((d) => d.parent_slug === parentSlug)
     .sort((a, b) => a.name.localeCompare(b.name, 'es'))
-  return [...staticChildren, ...districtChildren]
+  return [...staticChildren, ...provinceChildren, ...districtChildren]
 }
 
 export function getCatalogBreadcrumb(places, slug) {
-  return getBreadcrumb(places, slug, (s) => getDistrictPlace(s) || getDepartmentPlace(s))
+  return getBreadcrumb(
+    places,
+    slug,
+    (s) => getDistrictPlace(s) || getProvincePlace(s) || getDepartmentPlace(s),
+  )
 }
 
 /** Departamento al que pertenece un place_slug (foto, distrito, POI…) */
@@ -72,6 +91,9 @@ export function getDepartmentSlugForPlace(places, slug) {
 
   const dept = getDepartmentPlace(slug)
   if (dept) return dept.slug
+
+  const province = getProvincePlace(slug)
+  if (province) return province.parent_slug
 
   const place = getPlaceBySlug(places, slug) || getDistrictPlace(slug)
   if (!place) return null
@@ -156,12 +178,19 @@ export function filterFromSlug(places, slug) {
     return filter
   }
 
+  if (place.level === 'province') {
+    filter.region = place.parent_slug
+    filter.province = place.slug
+    return filter
+  }
+
   if (place.level === 'district') {
     filter.district = place.slug
     const parentProv = resolveCatalogPlace(places, place.parent_slug)
     if (parentProv?.province_id) {
       filter.province = parentProv.slug
-      filter.region = 'amazonas'
+      // Amazonas: parent_slug === 'amazonas' (igual que antes)
+      filter.region = parentProv.parent_slug || 'amazonas'
     }
     return filter
   }
@@ -173,6 +202,10 @@ export function filterFromSlug(places, slug) {
     if (item.level === 'district') filter.district = item.slug
     if (item.province_id && item.parent_slug === 'amazonas') {
       filter.province = item.slug
+    }
+    if (item.level === 'province') {
+      filter.province = item.slug
+      filter.region = item.parent_slug
     }
   }
 
@@ -207,10 +240,14 @@ export function getRegionOptions(_places, countrySlug) {
 }
 
 export function getProvinceOptions(places, regionSlug) {
-  if (regionSlug !== 'amazonas') return []
-  return getChildren(places, 'amazonas')
-    .filter((p) => p.province_id)
-    .sort((a, b) => a.sort_order - b.sort_order)
+  // Amazonas: misma lógica / slugs de places.js (no tocar)
+  if (regionSlug === 'amazonas') {
+    return getChildren(places, 'amazonas')
+      .filter((p) => p.province_id)
+      .sort((a, b) => a.sort_order - b.sort_order)
+  }
+  if (!regionSlug) return []
+  return getProvincesForDepartment(regionSlug)
 }
 
 export function getDistrictOptions(_places, provinceSlug) {
