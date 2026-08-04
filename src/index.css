@@ -117,3 +117,53 @@ button:not(:disabled) {
   background-size: 200% 100%;
   animation: editor-shimmer 1.5s ease-in-out infinite;
 }
+
+/* Editor chrome — iconos compactos */
+.editor-brand-mark {
+  animation: editor-brand-glow 3.2s ease-in-out infinite;
+}
+
+@keyframes editor-brand-glow {
+  0%,
+  100% {
+    box-shadow: 0 8px 20px rgb(245 158 11 / 0.22);
+  }
+  50% {
+    box-shadow: 0 8px 28px rgb(245 158 11 / 0.4);
+  }
+}
+
+.editor-icon-btn:hover .editor-icon-globe {
+  animation: editor-globe-spin 0.7s ease-in-out;
+}
+
+@keyframes editor-globe-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(20deg);
+  }
+}
+
+.editor-icon-btn:hover .editor-icon-exit {
+  animation: editor-exit-nudge 0.45s ease-out;
+}
+
+@keyframes editor-exit-nudge {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-brand-mark,
+  .editor-icon-btn:hover .editor-icon-globe,
+  .editor-icon-btn:hover .editor-icon-exit {
+    animation: none;
+  }
+}

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { EMPTY_FILTER,
   getFilteredPhotoEntries,
-  getFilterSummary,
   initDistrictCatalog,
   resolveCatalogPlace,
   resolveInitialFilter,
@@ -93,7 +92,6 @@ export default function GalleryEditor({
     uploadPlace &&
       (uploadPlace.level === 'district' || String(uploadSlug).startsWith('dist-')),
   )
-  const summary = getFilterSummary(places, filter)
   const showPlaceLabel = !filter.district && filteredPhotos.length > 0
   const hasAnyFilter = Boolean(
     filter.country || filter.region || filter.province || filter.district,
@@ -170,11 +168,7 @@ export default function GalleryEditor({
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#09090b] text-zinc-100">
       <EditorChrome
-        userEmail={user?.email}
         photoCount={filteredPhotos.length}
-        uploadLoading={loading}
-        canUpload={canUpload}
-        onUploadClick={() => setUploadOpen(true)}
         onViewMap={onViewMap}
         onSignOut={onSignOut}
       />
@@ -191,16 +185,6 @@ export default function GalleryEditor({
         />
 
         <main className="editor-scroll min-h-0 flex-1 overflow-y-auto">
-          <div className="border-b border-white/[0.06] px-5 py-4 lg:hidden">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
-              Vista actual
-            </p>
-            <p className="mt-1 text-sm font-medium text-zinc-200">{summary}</p>
-            <p className="mt-0.5 text-xs text-zinc-500">
-              {filteredPhotos.length} {filteredPhotos.length === 1 ? 'foto' : 'fotos'}
-            </p>
-          </div>
-
           {alertMessage && (
             <div
               role="alert"
