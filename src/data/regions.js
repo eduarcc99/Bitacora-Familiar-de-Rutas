@@ -565,7 +565,8 @@ export function featurePhotoState(feature, places, entriesGrouped, level) {
     photoUrls.push(...photoUrlsFromEntries(entriesGrouped[slug]));
   }
 
-  const uniqueUrls = [...new Set(photoUrls)];
+  // Mapa: máx. 4 URLs (collage 2×2). El carrusel sigue usando todas las entradas.
+  const uniqueUrls = [...new Set(photoUrls)].slice(0, 4);
   const hasPhoto = uniqueUrls.length > 0;
 
   return {
@@ -583,7 +584,7 @@ export function buildCountryShellPhotoState(places, entriesGrouped) {
   for (const slug of slugs) {
     photoUrls.push(...photoUrlsFromEntries(entriesGrouped[slug]));
   }
-  const uniqueUrls = [...new Set(photoUrls)];
+  const uniqueUrls = [...new Set(photoUrls)].slice(0, 4);
   return {
     photo_urls: uniqueUrls.length ? JSON.stringify(uniqueUrls) : "",
     has_photo: uniqueUrls.length > 0,

@@ -1,8 +1,8 @@
 # EYL 2.0 — Documento de producto
 
 > Bitácora familiar de rutas · Mapa de recuerdos sobre polígonos reales de Perú  
-> Versión: borrador · Marzo 2026  
-> Estado: planificación (reinicio de interfaz, conservando lógica de polígonos)
+> Versión: 2.0 en curso · Agosto 2026  
+> Estado: **funcionando en local** — visitante + editor separados; Perú completo en catálogo y carrusel
 
 ---
 
@@ -30,230 +30,218 @@ Referencia visual (boceto del producto):
 
 ## 2. Usuarios y acceso
 
-| Rol | Quién | Qué puede hacer |
-|-----|--------|-----------------|
-| **Familia (editor)** | Personas con cuenta Supabase | Subir, editar y borrar fotos por distrito |
-| **Visitante** | Cualquiera con el **link** | Solo ver el mapa y las fotos (sin login) |
+| Rol | Quién | Qué puede hacer | Ruta |
+|-----|--------|-----------------|------|
+| **Visitante** | Cualquiera con el **link** | Ver mapa y fotos (sin login) | `/` |
+| **Familia (editor)** | Personas con cuenta Supabase | Subir, editar y borrar fotos por distrito | `/editar` |
 
-- **Privacidad:** no es una red social abierta; es un mapa compartido por enlace (estilo álbum familiar privado por URL).
-- **Login:** solo para editar. El visitante entra directo al mapa.
+- **Privacidad:** no es una red social abierta; es un mapa compartido por enlace.
+- **Login:** solo en `/editar`. El visitante entra directo al mapa.
+- **Acceso editor desde visitante:** icono tenue (cuadrícula) esquina inferior izquierda → `/editar`.
+- **Volver al mapa desde editor:** icono globo en la barra → `/`.
 
 ---
 
 ## 3. Alcance geográfico
 
-| Fase | Territorio | Objetivo |
-|------|------------|----------|
-| **2.0 MVP** | **Perú completo** | Departamentos → provincias → distritos con la misma lógica de polígonos |
-| **Datos** | GeoJSON INEI (ya en el repo) | `peru-departments`, `peru-provinces-detailed`, `peru-districts` |
-| **Contenido inicial** | Donde ya hay fotos (ej. Amazonas / Chachapoyas) | Esas zonas “brillan” primero en el globo |
-
-No volver a encerrar el producto solo en Chachapoyas: el 2.0 apunta a **perfeccionar Perú entero**, empezando por donde ya hay recuerdos cargados.
-
----
-
-## 4. Reglas de polígonos (innegociables — heredadas de 1.0)
-
-Estas reglas **no se renegocian** en el rediseño:
-
-1. **Una foto vive en un solo polígono:** si se sube en Levanto, solo rellena Levanto — nunca la provincia, el departamento ni el padre.
-2. **Varias fotos en el mismo distrito = collage** dentro de ese polígono (no una sola foto tapando las demás).
-3. **Sin foto = gris** (por visitar); **con foto = recuerdo visible** dentro del contorno del distrito.
-4. **Capas por nivel de zoom:** en cada escala solo un nivel administrativo dominante (evitar líneas superpuestas confusas).
-5. **Las fotos siguen la forma del polígono** (fill-pattern / collage), no un pin flotante.
+| Fase | Territorio | Estado |
+|------|------------|--------|
+| **2.0** | **Perú completo** | Departamentos → provincias → distritos |
+| **Datos** | GeoJSON INEI | `peru-departments`, `peru-provinces`, `peru-districts`, `amazonas-districts` |
+| **Amazonas** | Lógica 1.0 intacta | Slugs `chachapoyas`, `bagua`, … + GeoJSON detallado |
+| **Resto del Perú** | Catálogo extendido | Provincias `prov-{IDPROV}` + distritos `dist-{UBIGEO}` (merge sin pisar Amazonas) |
 
 ---
 
-## 5. Experiencia visitante (prioridad: móvil)
+## 4. Reglas de polígonos (innegociables)
 
-### 5.1 Dispositivo de referencia
+1. **Una foto vive en un solo polígono** (distrito). Nunca en provincia/departamento padre.
+2. **Varias fotos en el mismo distrito = collage** dentro del polígono.
+3. **Sin foto = gris**; **con foto = recuerdo** en el contorno.
+4. **Capas por nivel de zoom:** un nivel administrativo dominante.
+5. **Las fotos siguen la forma del polígono** (fill-pattern), no un pin.
 
-- **Samsung Galaxy Note 14 Pro** (pantalla principal de diseño y pruebas de demo).
-- Diseño **mobile-first**; desktop es secundario.
+---
 
-### 5.2 Al abrir la app (visitante con link)
+## 5. Experiencia visitante (`/` · `VisitorApp`)
+
+### 5.1 Al abrir
 
 1. Pantalla casi **100 % mapa**.
-2. Fondo: **espacio / estrellas**.
-3. Sobre el fondo: **collage de fotos desvanecido** (opacidad baja), mezclando universo y recuerdos.
-4. Centro: **globo terráqueo** con países en contorno tenue.
-5. **Perú (u otras zonas con fotos) resaltado** en el globo según datos reales en Supabase — no hardcodeado a un país.
-6. **Sin** leyendas largas, breadcrumbs, textos de ayuda ni instrucciones en pantalla.
+2. Fondo: **estrellas animadas** (espacio transparente del globo para verlas).
+3. **Collage de 4 fotos** desvanecido (solo en vista globo / sin país).
+4. **Globo** con Perú y fotos según Supabase.
+5. Sin header, footer, breadcrumbs ni textos de ayuda.
 
-### 5.3 Collage de fondo (capa decorativa)
-
-- Usa **4 fotos** por carga (selección aleatoria).
-- Origen: las mismas fotos que ya están en el mapa (Supabase Storage).
-- En **cada recarga** puede cambiar la selección.
-- Efecto: **desvanecido** (fade), mezclado con estrellas/universo.
-- No es interactivo; es ambiente visual.
-
-### 5.4 Interacción principal (dos toques)
+### 5.2 Interacción (dos toques)
 
 | Toque | Comportamiento |
 |-------|----------------|
-| **1.er toque** en zona / polígono | **Solo zoom encuadrado** al nivel correspondiente (depto → prov → distrito). Sin panel, sin carrusel. |
-| **2.º toque** (misma zona, ya encuadrada) | **Carrusel de fotos** de ese lugar (hoja inferior o overlay mínimo). |
-| **Alejar con gesto** | Volver al nivel anterior hasta el globo. |
+| **1.er toque** | Zoom encuadrado (país → depto → prov → distrito). |
+| **2.º toque** (misma zona) | **Carrusel** de fotos (depto, provincia o distrito · todo Perú). |
+| **Sin fotos** | Carrusel muestra “Sin fotos aún”. |
 
-Reglas de encuadre:
+### 5.3 Controles de navegación
 
-- En **distrito**: un zoom que muestre **todo el polígono** según pantalla (referencia: Note 14 Pro).
-- Las fotos **siguen la forma** del polígono en el mapa; el carrusel es lectura ampliada al segundo toque.
+Aparecen al salir de la vista mundo:
 
-### 5.5 Animación de inicio (globo → zona con fotos)
+| Control | Acción |
+|---------|--------|
+| **← / →** | Historial atrás / adelante |
+| **🌐 Inicio del mundo** | Vuelve al globo (filtro vacío) |
 
-- **Sí**, hay animación suave al abrir (`flyTo` / `easeTo`).
-- **No está fija en Perú:** el destino es la **región del mundo donde ya hay fotos**.
-  - Hoy: probablemente Perú / Amazonas (donde existen entradas).
-  - Si mañana hay fotos en Brasil: la animación iría hacia **Brasil**.
-  - Lógica: calcular bounds de todos los polígonos con `has_photo` y centrar ahí.
-- Si no hay fotos en ningún sitio: queda en vista globo sin animación agresiva.
+Controles +/− del mapa: ocultos en visitante.
 
-### 5.6 Lo que NO debe aparecer (lecciones de la demo 1.0)
+### 5.4 Acceso editor
 
-- Header con tagline largo (“Gris = por visitar · Foto = recuerdo · Editar…”).
-- Breadcrumb `Perú › Amazonas › Chachapoyas › …` fijo en pantalla.
-- Dropdown de distritos siempre visible.
-- Botón **Editar** prominente en la vista visitante.
-- Texto de ayuda en el footer (“Pellizca o usa +/−…”).
-- Múltiples capas de UI superpuestas (panel + mapa + barra + header).
-
-**Principio UI:** *Si no es mapa o foto, no está en pantalla.*
+- Icono de cuadrícula **casi invisible** abajo a la izquierda → gestión de fotos.
 
 ---
 
-## 6. Experiencia editor (familia)
+## 6. Experiencia editor (`/editar` · `EditorApp`)
 
-- **Pantalla separada** del mapa visitante (no mezclar modos en la misma vista).
-- Acceso: botón discreto o URL `/editar` + login Supabase.
-- Flujo mínimo:
-  1. Iniciar sesión
-  2. Elegir departamento → provincia → **distrito**
-  3. Subir foto(s)
-  4. Guardar → visible en el mapa público al recargar
+**Sin mapa.** Solo catálogo de gestión.
 
-Campos por entrada (heredado): foto, fecha opcional, nota opcional, estado visitado.
+### 6.1 Flujo
+
+1. Login Supabase (pantalla de acceso).
+2. Elegir lugar con **desplegable compacto**: departamento → provincia → **distrito**.
+3. Un solo botón de subida: **Subir a {distrito}**.
+4. Fotos visibles en el mapa visitante tras recargar `/`.
+
+### 6.2 UI móvil (estado actual)
+
+| Elemento | Comportamiento |
+|----------|----------------|
+| **Barra superior** | Logo EYL + “Gestión” + conteo; iconos **mapa** y **salir** (sin segundo botón Subir) |
+| **Dónde subir** | Trigger compacto desplegable (no 4 dropdowns ni lista a pantalla completa) |
+| **Al elegir distrito** | Se cierra solo; queda “Subir a …” |
+| **Filtro tras subir** | **No se resetea** (ubicación estable) |
+| **Subida** | Solo con **distrito** elegido (`place_slug` = ese distrito) |
+
+### 6.3 Catálogo geográfico
+
+- **Amazonas:** misma lógica / slugs de siempre (no modificada).
+- **Otros departamentos** (San Martín, etc.): provincias y distritos INEI disponibles para filtrar y subir.
 
 ---
 
-## 7. Stack técnico (se mantiene)
+## 7. Stack técnico
 
 | Capa | Tecnología |
 |------|------------|
-| Frontend | React 19 + Vite |
+| Frontend | React 19 + Vite + Tailwind 4 |
 | Mapa | MapLibre GL JS |
-| Datos geo | GeoJSON INEI en `public/data/` |
+| Datos geo | GeoJSON INEI en `public/data/` y `src/data/` |
 | Backend | Supabase (Auth, Postgres, Storage `photos`) |
-| Hosting | [Netlify — bitacorafamilairderutas.netlify.app](https://bitacorafamilairderutas.netlify.app/) |
-| Repo | Bitácora-Familiar-de-Rutas |
+| Hosting | [Netlify](https://bitacorafamilairderutas.netlify.app/) |
 
-### Qué se reutiliza del código 1.0
+### Archivos clave 2.0
 
-- `photoCollage.js`, `mapPhotoPatterns.js` — collage dentro del polígono
-- `districtPlaces.js`, `regions.js` — slugs UBIGEO, enriquecimiento GeoJSON
-- `supabase/` — schema y migraciones
-- GeoJSON de Perú
+| Área | Archivos |
+|------|----------|
+| Rutas | `App.jsx` → `/` visitante, `/editar` editor |
+| Visitante | `visitor/VisitorApp.jsx`, `StarfieldBackground.jsx`, `VisitorNavControls.jsx`, `VisitorPhotoCarousel.jsx` |
+| Editor | `editor/EditorApp.jsx`, `gallery/GalleryEditor.jsx`, `gallery/EditorSidebar.jsx`, `gallery/EditorChrome.jsx` |
+| Catálogo | `placeCatalog.js`, `provincePlaces.js`, `districtPlaces.js` (Amazonas + merge Perú) |
+| Carrusel | `visitorCarousel.js` + `photoHierarchy.js` |
+| Mapa | `GlobeMap.jsx`, `mapNavigation.js`, `mapScope.js` |
 
-### Qué se reescribe en 2.0
+### Legacy
 
-- `App.jsx` — layout visitante vs editor
-- Componentes de UI visitante (`ChachapoyasFilterBar`, `PlacePanel`, header actual)
-- Flujo de navegación / encuadre (`GlobeMap.jsx` → módulos más pequeños)
-- Estilos móvil (`App.css` → sistema más limpio, posible Tailwind en visitante)
-- Vista globo + capa espacio/collage (nueva)
-
----
-
-## 8. Plan de implementación paso a paso
-
-### Paso 0 — Documentación ✅ (este archivo)
-Producto, reglas, UI, alcance. Ajustar según feedback familiar.
-
-### Paso 1 — Shell visitante móvil 🚧 (en progreso)
-
-- [x] Ruta `/` → visitante 2.0 (`VisitorApp`) — solo mapa
-- [x] Ruta `/editar` → catálogo 2.0 (`EditorApp`) — sin mapa
-- [x] Pantalla completa mapa + estrellas + 4 fotos desvanecidas
-- [x] Sin header, footer ni filtros en visitante
-- [x] Globo con fondo transparente (estrellas visibles)
-- [x] Acceso editor discreto (icono tenue → gestión de fotos)
-- [ ] Probar en Note 14 Pro
-
-### Paso 2 — Globo + Perú con fotos existentes
-- Proyección globo al inicio
-- Capa departamentos/perú con fill-pattern donde `has_photo`
-- Collage de fondo aleatorio desde entradas con foto
-- Perú visualmente destacado respecto al resto del mundo
-
-### Paso 3 — Navegación por niveles (Perú completo) 🚧
-- [x] **1.er toque país** → encuadre animado, borde doble, tinte, departamentos visibles
-- [x] **1.er toque departamento** → encuadre, borde resaltado, provincias visibles
-- [x] **1.er toque provincia** → encuadre, distritos al acercar
-- [x] **2.º toque** → carrusel de fotos (depto / provincia / distrito · todo Perú)
-- [ ] Pinch/alejar → volver al nivel anterior
-- Zoom: globo → departamento → provincia → distrito
-- Encuadre automático (`fitBounds` / `cameraForBounds`) **por nivel**
-- En distrito: **siempre** se ve el polígono entero en pantalla
-- Reglas de capas (un nivel visible por zoom)
-
-### Paso 4 — Gestos móvil
-- Pinch zoom in/out dentro del nivel permitido
-- Pan limitado al área activa
-- Sin botones +/− obligatorios (opcional ocultos)
-
-### Paso 5 — Editor separado 🚧
-- [x] Ruta `/editar` → catálogo 2.0 (`EditorApp`) — **sin mapa**
-- [x] Login → gestión de fotos (distrito obligatorio al subir)
-- [x] «Ver mapa» vuelve a visitante `/`
-- [x] Catálogo distritos: Amazonas intacto + resto de departamentos Perú
-- [ ] Pulido móvil del catálogo
-
-### Paso 6 — Pulido demo
-- Rendimiento collage + globo en Note 14 Pro
-- Carga progresiva de distritos (no cargar 1800+ distritos de golpe en zoom bajo)
-- PWA opcional (instalar en el celular)
+- `AppLegacy.jsx` ya **no** es la ruta `/editar` (queda en el repo; el flujo activo es `EditorApp`).
 
 ---
 
-## 9. Criterios de éxito (próxima demo)
+## 8. Plan de implementación — estado
 
-La demo 2.0 es **exitosa** si en un **Note 14 Pro**, con el link público:
+### Paso 0 — Documentación ✅
 
-1. Al abrir, se ve el **globo con Perú iluminado** por fotos reales (sin leer instrucciones).
-2. Al acercar a un distrito con fotos, el **polígono entero encuadra** la pantalla.
-3. Las **fotos siguen la forma** del distrito.
-4. **No hay que hacer scroll** de página ni arrastrar el mapa para “buscar” los límites.
-5. La interfaz tiene **cero textos de ayuda** visibles en la vista principal.
-6. Un familiar puede **subir una foto** desde el editor y verla en el mapa visitante tras recargar.
+### Paso 1 — Shell visitante ✅
+
+- [x] `/` → `VisitorApp`
+- [x] `/editar` → `EditorApp` (sin mapa)
+- [x] Estrellas + collage + globo transparente
+- [x] Acceso editor discreto
+- [ ] Validar en Note 14 Pro (dispositivo real)
+
+### Paso 2 — Globo + fotos ✅ (base)
+
+- [x] Proyección globo al inicio
+- [x] Collage de fondo aleatorio
+- [x] Estrellas visibles (fog con espacio transparente en visitante)
+
+### Paso 3 — Navegación por niveles ✅ (casi)
+
+- [x] 1.er toque país / depto / provincia
+- [x] 2.º toque → carrusel (todo Perú)
+- [x] Botón inicio del mundo
+- [ ] Pinch/alejar → nivel anterior (pendiente fino)
+
+### Paso 4 — Gestos móvil 🚧
+
+- Controles +/− ocultos
+- Pinch / pan: mejorar límites por nivel
+
+### Paso 5 — Editor separado ✅
+
+- [x] Catálogo sin mapa
+- [x] Distrito obligatorio al subir
+- [x] Filtro estable tras subir (P3)
+- [x] Perú completo en selector (Amazonas intacto)
+- [x] UI móvil: desplegable + iconos de barra
+- [x] Un solo CTA “Subir a …”
+
+### Paso 6 — Pulido demo 🚧
+
+- Rendimiento Note 14 Pro
+- Carga progresiva de distritos
+- PWA opcional
 
 ---
 
-## 10. Decisiones cerradas (Mar 2026)
+## 9. Criterios de éxito
+
+| # | Criterio | Estado |
+|---|----------|--------|
+| 1 | Globo + estrellas al abrir (sin instrucciones) | ✅ local |
+| 2 | Encuadre a distrito / niveles | ✅ local |
+| 3 | Fotos en forma de polígono | ✅ (lógica 1.0) |
+| 4 | Sin scroll de página en visitante | ✅ |
+| 5 | Cero textos de ayuda en mapa | ✅ |
+| 6 | Subir foto en editor → ver en visitante | ✅ local |
+| 7 | Carrusel 2.º toque en todo Perú | ✅ local |
+| 8 | Editor usable en móvil (desplegable) | ✅ local |
+| — | Demo en Note 14 Pro / Netlify | ⏳ pendiente |
+
+---
+
+## 10. Decisiones cerradas
 
 | # | Pregunta | Decisión |
 |---|----------|----------|
-| **A** | ¿Toque en distrito? | **1.er toque = solo zoom encuadrado.** **2.º toque = carrusel de fotos.** |
-| **B** | ¿Fotos en collage de fondo? | **4 fotos**, aleatorias en cada carga. |
-| **C** | ¿Animación al inicio? | **Sí**, hacia la zona con fotos (dinámico: Perú hoy; Brasil u otro si hubiera fotos ahí). |
-| **D** | ¿Dominio? | **Netlify:** https://bitacorafamilairderutas.netlify.app/ |
-| **E** | ¿Fotos migradas? | **No todas.** Subida parcial; editor 1.0 poco intuitivo → ver §13 pendientes. |
+| **A** | ¿Toque en zona? | 1.er = zoom · 2.º = carrusel |
+| **B** | ¿Collage de fondo? | 4 fotos, aleatorias por carga |
+| **C** | ¿Animación inicio? | Hacia zona con fotos (dinámico) |
+| **D** | ¿Hosting? | Netlify |
+| **E** | ¿Mapa en editor? | **No.** Solo visitante `/` |
+| **F** | ¿Dónde vive la foto? | Solo **distrito** |
+| **G** | ¿Amazonas? | No romper slugs/GeoJSON detallado; extender el resto por merge |
+| **H** | ¿UI editor móvil? | Desplegable compacto + iconos; un botón Subir |
 
 ---
 
-## 11. Pendientes (fuera del MVP visitante 2.0)
+## 11. Pendientes
 
-Cosas que **no bloquean** el Paso 1–4 del mapa visitante, pero hay que arreglar después:
-
-| ID | Problema (demo 1.0) | Notas |
-|----|---------------------|-------|
-| **P1** | Editor poco intuitivo en móvil | Flujo confuso para familia |
-| **P2** | Foto subida a **Levanto** apareció en **Chachapoyas** | ✅ Editor exige distrito; `place_slug` = distrito elegido |
-| **P3** | Tras subir, la página **recargaba sola** y perdía el lugar | ✅ Filtro del editor ya no se resetea al refrescar datos |
-| **P4** | No están todas las fotos en Supabase nuevo | Migración / re-subida gradual |
-| **P5** | Refactor editor en pantalla separada (`/editar`) | Paso 5 del plan |
-
-**Regla:** el visitante 2.0 se construye aunque P1–P4 sigan pendientes; el editor se aborda en Paso 5 con flujo nuevo.
+| ID | Tema | Notas |
+|----|------|-------|
+| **P1** | ~~Editor confuso en móvil~~ | ✅ Desplegable + iconos |
+| **P2** | ~~Foto en lugar equivocado~~ | ✅ Distrito obligatorio |
+| **P3** | ~~Filtro se perdía al subir~~ | ✅ Sin reset por `places` |
+| **P4** | Fotos no migradas todas | Re-subida gradual |
+| **P5** | ~~Editor en `/editar`~~ | ✅ `EditorApp` |
+| **P6** | Pinch → nivel anterior | Gestos visitante |
+| **P7** | Prueba Note 14 Pro + deploy | Validación demo familiar |
 
 ---
 
@@ -261,11 +249,13 @@ Cosas que **no bloquean** el Paso 1–4 del mapa visitante, pero hay que arregla
 
 | Término | Significado |
 |---------|-------------|
-| **Distrito** | Polígono INEI (UBIGEO), slug `dist-XXXXXXXX` |
-| **Collage** | Varias fotos combinadas en un patrón dentro de un polígono |
-| **Encuadre** | Ajustar zoom y centro para que el polígono quepa entero en pantalla |
-| **Visitante** | Quien abre el link sin login |
-| **Familia** | Quien tiene cuenta y sube fotos |
+| **Distrito** | Polígono INEI, slug `dist-XXXXXXXX` |
+| **Provincia (resto Perú)** | Slug `prov-{IDPROV}` (ej. `prov-2208` Rioja) |
+| **Provincia (Amazonas)** | Slugs de `places.js`: `chachapoyas`, `bagua`, … |
+| **Collage** | Varias fotos en patrón dentro del polígono |
+| **Encuadre** | Zoom/centro para ver el polígono entero |
+| **Visitante** | `/` sin login |
+| **Familia / Editor** | `/editar` con login |
 
 ---
 
@@ -273,9 +263,12 @@ Cosas que **no bloquean** el Paso 1–4 del mapa visitante, pero hay que arregla
 
 | Fecha | Cambio |
 |-------|--------|
-| Mar 2026 | Creación doc 2.0 tras demo 1.0; feedback móvil; visión globo + universo + Perú completo |
-| Mar 2026 | Decisiones §10 cerradas: doble toque, 4 fotos fondo, animación dinámica, Netlify; pendientes editor §11 |
+| Mar 2026 | Creación doc 2.0 tras demo 1.0 |
+| Mar 2026 | Decisiones: doble toque, 4 fotos fondo, animación, Netlify |
+| Ago 2026 | Visitante + editor separados; estrellas; carrusel Perú; catálogo deptos; editor móvil desplegable |
+| Ago 2026 | **Doc actualizada:** estado “funcionando en local”; P1–P3/P5 cerrados; pendientes P4/P6/P7 |
+| Ago 2026 | Collage del mapa fijo **2×2** (mosaico legible a cualquier zoom; 1 foto se cicla en 4 celdas) |
 
 ---
 
-*Documento vivo. **Listo para Paso 1** (shell visitante móvil). Editor y bugs P1–P4 en Paso 5.*
+*Documento vivo. Base 2.0 operativa en local. Siguiente foco: gestos pinch (P6) y demo en dispositivo / Netlify (P7).*

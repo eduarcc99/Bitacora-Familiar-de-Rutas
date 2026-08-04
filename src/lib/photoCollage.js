@@ -1,6 +1,12 @@
 /**
- * Combina N URLs de foto en una cuadrícula para fill-pattern de MapLibre.
+ * Collage fijo 2×2 para fill-pattern de MapLibre.
+ * Así el mosaico se lee igual con 1 o muchas fotos (el tile no es una sola foto gigante).
  */
+
+export const MAP_COLLAGE_COLS = 2
+export const MAP_COLLAGE_ROWS = 2
+export const MAP_COLLAGE_SLOTS = MAP_COLLAGE_COLS * MAP_COLLAGE_ROWS
+
 export async function loadImage(url) {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -11,45 +17,82 @@ export async function loadImage(url) {
   })
 }
 
-function gridForCount(count) {
-  if (count <= 1) return { cols: 1, rows: 1 }
-  if (count <= 4) return { cols: 2, rows: 2 }
-  if (count <= 6) return { cols: 3, rows: 2 }
-  if (count <= 9) return { cols: 3, rows: 3 }
-  if (count <= 12) return { cols: 4, rows: 3 }
-  const cols = 4
-  return { cols, rows: Math.ceil(count / cols) }
+/** Hasta 4 URLs; si hay menos, se ciclan para llenar el 2×2. */
+export function urlsForMapCollage(urls) {
+  const list = [...new Set((urls ?? []).filter(Boolean))]
+  if (!list.length) return []
+
+  const taken = list.slice(0, MAP_COLLAGE_SLOTS)
+  const slots = []
+  for (let i = 0; i < MAP_COLLAGE_SLOTS; i++) {
+    slots.push(taken[i % taken.length])
+  }
+  return slots
 }
 
+function drawCoverInCell(ctx, img, x, y, cellW, cellH, pad = 1.5) {
+  const left = x + pad
+  const top = y + pad
+  const iw = cellW - pad * 2
+  const ih = cellH - pad * 2
+  if (iw <= 0 || ih <= 0) return
+
+  // Cover centrado: llena la celda sin dejar huecos
+  const scale = Math.max(iw / img.width, ih / img.height)
+  const w = img.width * scale
+  const h = img.height * scale
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(left, top, iw, ih)
+  ctx.clip()
+  ctx.drawImage(img, left + (iw - w) / 2, top + (ih - h) / 2, w, h)
+  ctx.restore()
+}
+
+/**
+ * Genera ImageData 2×2. Siempre 4 celdas para que el patrón tileado
+ * se vea como mosaico a cualquier zoom (no una sola foto a pantalla completa).
+ */
 export async function buildCollageImageData(urls, size = 256) {
   const canvas = document.createElement('canvas')
   canvas.width = size
   canvas.height = size
   const ctx = canvas.getContext('2d')
-  ctx.fillStyle = '#2a3038'
+  ctx.fillStyle = '#1a1f28'
   ctx.fillRect(0, 0, size, size)
 
-  const list = urls.filter(Boolean)
-  if (!list.length) return ctx.getImageData(0, 0, size, size)
+  const slots = urlsForMapCollage(urls)
+  if (!slots.length) return ctx.getImageData(0, 0, size, size)
 
-  const { cols, rows } = gridForCount(list.length)
-  const images = await Promise.all(
-    list.map((url) => loadImage(url).catch(() => null)),
+  const uniqueToLoad = [...new Set(slots)]
+  const loaded = await Promise.all(
+    uniqueToLoad.map(async (url) => {
+      const img = await loadImage(url).catch(() => null)
+      return [url, img]
+    }),
   )
-  const cellW = size / cols
-  const cellH = size / rows
+  const byUrl = new Map(loaded)
 
-  images.forEach((img, i) => {
+  const cellW = size / MAP_COLLAGE_COLS
+  const cellH = size / MAP_COLLAGE_ROWS
+
+  slots.forEach((url, i) => {
+    const img = byUrl.get(url)
     if (!img) return
-    const col = i % cols
-    const row = Math.floor(i / cols)
-    const x = col * cellW
-    const y = row * cellH
-    const scale = Math.max(cellW / img.width, cellH / img.height)
-    const w = img.width * scale
-    const h = img.height * scale
-    ctx.drawImage(img, x + (cellW - w) / 2, y + (cellH - h) / 2, w, h)
+    const col = i % MAP_COLLAGE_COLS
+    const row = Math.floor(i / MAP_COLLAGE_COLS)
+    drawCoverInCell(ctx, img, col * cellW, row * cellH, cellW, cellH)
   })
+
+  // Separadores sutiles entre celdas (mosaico más claro)
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(cellW, 0)
+  ctx.lineTo(cellW, size)
+  ctx.moveTo(0, cellH)
+  ctx.lineTo(size, cellH)
+  ctx.stroke()
 
   return ctx.getImageData(0, 0, size, size)
 }
